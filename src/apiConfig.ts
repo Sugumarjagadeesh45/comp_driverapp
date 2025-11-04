@@ -2,10 +2,10 @@
 import { Platform } from 'react-native';
 
 // Toggle this flag to switch between environments
-const useLocalhost = true; 
+const useLocalhost = false; 
 
 
-const LOCAL_API_URL = "https://e1e42ad8559c.ngrok-free.app";
+const LOCAL_API_URL = "https://cmp-back.onrender.com";
 
 const LOCAL_SOCKET_URL = Platform.select({
   ios: "http://localhost:5001",
@@ -14,8 +14,8 @@ const LOCAL_SOCKET_URL = Platform.select({
 });
 
 // Live server URLs
-const LIVE_API_URL = "https://backendddcode-1.onrender.com/api";
-const LIVE_SOCKET_URL = "https://backendddcode-1.onrender.com";
+const LIVE_API_URL = "https://cmp-back.onrender.com/api";
+const LIVE_SOCKET_URL = "https://cmp-back.onrender.com";
 
 export const API_BASE = useLocalhost
   ? LOCAL_API_URL

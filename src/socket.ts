@@ -2,7 +2,7 @@ import { io } from "socket.io-client";
 import { Alert, Platform } from "react-native";
 import { AppState } from 'react-native';
 
-const SOCKET_URL = "https://e1e42ad8559c.ngrok-free.app";
+const SOCKET_URL = "https://cmp-back.onrender.com";
 
 
 // Enhanced socket configuration
