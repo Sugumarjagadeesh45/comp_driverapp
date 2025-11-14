@@ -24,16 +24,16 @@
     "geolib": "^3.3.4",
     "haversine": "^1.1.1",
     "haversine-distance": "^1.2.4",
-<<<<<<< HEAD
+ 
     "leaflet": "^1.9.4",
     "osrm-text-instructions": "^0.15.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-leaflet": "^5.0.0",
-=======
+
     "react": "19.1.0",
     "react-dom": "19.1.0",
->>>>>>> be9b8b78514281c40fc01426ef020247da1dc2da
+ 
     "react-native": "0.80.2",
     "react-native-background-actions": "^4.0.1",
     "react-native-background-timer": "^2.4.1",
