@@ -483,34 +483,35 @@ async showLocalNotification(notification) {
     console.error('❌ Error showing notification:', error);
   }
 }
-  // Setup foreground message handler WITH SOUND
-  setupForegroundHandler() {
-    try {
-      console.log('📱 Setting up foreground message handler WITH SOUND...');
+  
+setupForegroundHandler() {
+  try {
+    console.log('📱 Setting up foreground message handler WITH SOUND...');
+    
+    // Use modular approach
+    const unsubscribe = messaging().onMessage(async remoteMessage => {
+      console.log('📱 🔵 FOREGROUND FCM message received:', remoteMessage);
       
-      messaging().onMessage(async remoteMessage => {
-        console.log('📱 🔵 FOREGROUND FCM message received:', remoteMessage);
-        
-        // Show local notification with SOUND
-        await this.showLocalNotification({
-          title: remoteMessage.notification?.title || '🚖 New Ride Request',
-          body: remoteMessage.notification?.body || 'Tap to view ride details',
-          data: remoteMessage.data
-        });
-
-        // Emit event for app to handle
-        if (remoteMessage.data?.type === 'ride_request') {
-          console.log('📱 Emitting rideRequest event from foreground');
-          this.emit('rideRequest', remoteMessage.data);
-        }
+      // Show local notification with SOUND
+      await this.showLocalNotification({
+        title: remoteMessage.notification?.title || '🚖 New Ride Request',
+        body: remoteMessage.notification?.body || 'Tap to view ride details',
+        data: remoteMessage.data
       });
 
-      console.log('✅ Foreground message handler registered');
-    } catch (error) {
-      console.error('❌ Error setting up foreground handler:', error);
-    }
-  }
+      // Emit event for app to handle
+      if (remoteMessage.data?.type === 'ride_request') {
+        console.log('📱 Emitting rideRequest event from foreground');
+        this.emit('rideRequest', remoteMessage.data);
+      }
+    });
 
+    console.log('✅ Foreground message handler registered');
+    return unsubscribe;
+  } catch (error) {
+    console.error('❌ Error setting up foreground handler:', error);
+  }
+}
   // Setup background handler WITH SOUND
   async setupBackgroundHandler() {
     try {
@@ -609,67 +610,69 @@ async testNotification() {
 }
 
 
-  // Get FCM token
-  async getFCMToken(): Promise<string | null> {
-    try {
-      console.log('🔑 Getting FCM token...');
+// In getFCMToken method - FIX DEPRECATED METHOD
+async getFCMToken(): Promise<string | null> {
+  try {
+    console.log('🔑 Getting FCM token...');
+    
+    // ✅ Use the modular approach - no more deprecation warnings
+    const token = await messaging().getToken();
+    
+    if (token) {
+      this.fcmToken = token;
+      console.log('✅ FCM Token obtained:', token.substring(0, 20) + '...');
       
-      const token = await messaging().getToken();
-      
-      if (token) {
-        this.fcmToken = token;
-        console.log('✅ FCM Token obtained:', token.substring(0, 20) + '...');
-        
-        await AsyncStorage.setItem('fcmToken', token);
-        return token;
-      } else {
-        console.log('❌ No FCM token received');
-        return null;
-      }
-    } catch (error) {
-      console.error('❌ Error getting FCM token:', error);
+      await AsyncStorage.setItem('fcmToken', token);
+      return token;
+    } else {
+      console.log('❌ No FCM token received');
       return null;
     }
+  } catch (error) {
+    console.error('❌ Error getting FCM token:', error);
+    return null;
   }
-
-  // Setup token refresh handler
-  setupTokenRefreshHandler() {
-    try {
-      messaging().onTokenRefresh(async (newToken) => {
-        console.log('🔄 FCM token refreshed:', newToken.substring(0, 20) + '...');
-        
-        // Update token in backend
-        try {
-          const authToken = await AsyncStorage.getItem("authToken");
-          if (authToken) {
-            const response = await fetch(`${API_BASE}/api/drivers/update-fcm-token`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${authToken}`,
-              },
-              body: JSON.stringify({
-                fcmToken: newToken,
-                platform: Platform.OS
-              }),
-            });
-            
-            if (response.ok) {
-              console.log('✅ FCM token updated on server');
-            }
+}
+  
+// In setupTokenRefreshHandler method - FIX DEPRECATED METHOD
+setupTokenRefreshHandler() {
+  try {
+    // Use modular approach for token refresh
+    messaging().onTokenRefresh(async (newToken) => {
+      console.log('🔄 FCM token refreshed:', newToken.substring(0, 20) + '...');
+      
+      // Update token in backend
+      try {
+        const authToken = await AsyncStorage.getItem("authToken");
+        if (authToken) {
+          const response = await fetch(`${API_BASE}/drivers/update-fcm-token`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({
+              driverId: 'YOUR_DRIVER_ID', // You'll need to get this from storage
+              fcmToken: newToken,
+              platform: Platform.OS
+            }),
+          });
+          
+          if (response.ok) {
+            console.log('✅ FCM token updated on server');
           }
-        } catch (error) {
-          console.error('❌ Error updating FCM token:', error);
         }
-        
-        // Emit event for app to handle
-        this.emit('tokenRefresh', newToken);
-      });
-    } catch (error) {
-      console.error('❌ Error setting up token refresh handler:', error);
-    }
+      } catch (error) {
+        console.error('❌ Error updating FCM token:', error);
+      }
+      
+      // Emit event for app to handle
+      this.emit('tokenRefresh', newToken);
+    });
+  } catch (error) {
+    console.error('❌ Error setting up token refresh handler:', error);
   }
-
+}
   // Event emitter methods
   on(event: string, callback: Function) {
     if (!this.listeners.has(event)) {

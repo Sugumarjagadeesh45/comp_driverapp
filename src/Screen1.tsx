@@ -5191,52 +5191,239 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
       NotificationService.off('rideRequest', handleNotificationRideRequest);
     };
   }, [driverStatus, driverId, hasNotificationPermission]);
-  
-
-
-  // DriverScreen.tsx - FIXED FCM token registration
+ 
+ 
+  // In Screen1.tsx - Enhanced FCM token registration
 const sendFCMTokenToServer = async (token: string): Promise<boolean> => {
   try {
+    console.log('\n🔑 ===== FCM TOKEN REGISTRATION PROCESS =====');
+    console.log('📱 Driver ID:', driverId);
+    console.log('🔑 FCM Token:', token.substring(0, 20) + '...');
+    console.log('📏 Token Length:', token.length);
+    console.log('📱 Platform:', Platform.OS);
+
     const authToken = await AsyncStorage.getItem("authToken");
     if (!authToken) {
-      console.log('❌ No auth token available for FCM registration');
+      console.log('❌ NO AUTH TOKEN AVAILABLE FOR FCM REGISTRATION');
       return false;
     }
 
-    console.log('📤 Registering FCM token with server...', token.substring(0, 20) + '...');
+    if (!driverId) {
+      console.log('❌ NO DRIVER ID AVAILABLE FOR FCM REGISTRATION');
+      return false;
+    }
 
-    // Use the correct endpoint and data structure
-    const response = await fetch(`${API_BASE}/api/drivers/update-fcm-token`, {
+    const payload = {
+      driverId: driverId,
+      fcmToken: token,
+      platform: Platform.OS,
+      appVersion: '1.0.0'
+    };
+
+    console.log('📦 Sending FCM registration payload:', payload);
+
+    const response = await fetch(`${API_BASE}/drivers/update-fcm-token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${authToken}`,
       },
-      body: JSON.stringify({
-        driverId: driverId, // Make sure driverId is available
-        fcmToken: token,
-        platform: Platform.OS,
-        appVersion: '1.0.0',
-        timestamp: new Date().toISOString()
-      }),
+      body: JSON.stringify(payload),
     });
 
-    const responseData = await response.json();
-    console.log('📱 Server response for FCM registration:', responseData);
+    const responseText = await response.text();
+    console.log('📱 Server Response Status:', response.status);
+    console.log('📱 Server Response Raw:', responseText);
+
+    let responseData;
+    try {
+      responseData = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('❌ SERVER RETURNED NON-JSON RESPONSE:', responseText);
+      return false;
+    }
+
+    console.log('📱 Server Response Parsed:', responseData);
 
     if (response.ok && responseData.success) {
-      console.log('✅ FCM token registered on server successfully');
+      console.log('✅ FCM TOKEN REGISTERED ON SERVER SUCCESSFULLY');
+      console.log('✅ Driver:', responseData.driverId);
+      console.log('✅ Name:', responseData.name);
+      console.log('✅ Token Updated:', responseData.tokenUpdated);
+      console.log('================================================\n');
       return true;
     } else {
-      console.log('❌ Server error registering FCM token:', responseData.message || response.statusText);
+      console.log('❌ SERVER ERROR REGISTERING FCM TOKEN:', responseData.error || responseData.message);
+      console.log('================================================\n');
       return false;
     }
   } catch (error) {
-    console.error('❌ Network error registering FCM token:', error);
+    console.error('❌ NETWORK ERROR REGISTERING FCM TOKEN:', error);
+    console.log('================================================\n');
     return false;
   }
 };
 
+
+
+
+const forceRefreshFCMToken = async () => {
+  try {
+    console.log('\n🔄 ===== FORCE FCM TOKEN REFRESH PROCESS =====');
+    console.log('📱 Driver ID:', driverId);
+    console.log('🔐 Checking FCM permissions...');
+
+    // Check and request permissions first
+    const authStatus = await messaging().hasPermission();
+    console.log('🔐 Current Permission Status:', authStatus);
+
+    if (authStatus === messaging.AuthorizationStatus.NOT_DETERMINED) {
+      console.log('🔐 Requesting notification permission...');
+      const newStatus = await messaging().requestPermission();
+      console.log('🔐 New Permission Status:', newStatus);
+    }
+
+    console.log('🗑️ Deleting old FCM token...');
+    
+    // Delete current token
+    try {
+      await messaging().deleteToken();
+      console.log('✅ Old FCM token deleted successfully');
+    } catch (deleteError) {
+      console.log('⚠️ Could not delete old token (might already be invalid):', deleteError);
+    }
+
+    console.log('🔑 Generating NEW FCM token...');
+    
+    // Get new token with retry logic
+    let newToken: string | null = null;
+    let retryCount = 0;
+    
+    while (!newToken && retryCount < 3) {
+      try {
+        newToken = await messaging().getToken();
+        if (!newToken) {
+          retryCount++;
+          console.log(`🔄 Retry ${retryCount}/3: Waiting for token...`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      } catch (tokenError) {
+        console.error(`❌ Token generation error (attempt ${retryCount + 1}):`, tokenError);
+        retryCount++;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    if (newToken) {
+      console.log('🎉 NEW FCM TOKEN GENERATED SUCCESSFULLY!');
+      console.log('🔑 Token:', newToken);
+      console.log('📏 Length:', newToken.length);
+      console.log('🔍 Token Preview:', `${newToken.substring(0, 15)}...${newToken.slice(-10)}`);
+
+      console.log('📤 Registering new token with server...');
+      
+      // Register with server
+      const registered = await sendFCMTokenToServer(newToken);
+      
+      if (registered) {
+        console.log('✅ NEW FCM TOKEN REGISTERED WITH SERVER!');
+        
+        Alert.alert(
+          '✅ SUCCESS!', 
+          `New FCM token registered successfully!\n\nToken Preview: ${newToken.substring(0, 15)}...\nLength: ${newToken.length} characters\n\nTesting the token now...`
+        );
+        
+        // Test the new token immediately
+        setTimeout(() => {
+          testNewFCMToken(newToken!);
+        }, 3000);
+      } else {
+        Alert.alert('❌ REGISTRATION FAILED', 'Failed to register new FCM token with server. Check server logs.');
+      }
+    } else {
+      console.log('❌ FAILED TO GENERATE NEW FCM TOKEN AFTER 3 ATTEMPTS');
+      Alert.alert(
+        '❌ TOKEN GENERATION FAILED', 
+        'Could not generate new FCM token. Please check:\n\n1. Internet connection\n2. Firebase configuration\n3. App permissions'
+      );
+    }
+    
+    return newToken;
+  } catch (error) {
+    console.error('❌ CRITICAL ERROR IN FCM TOKEN REFRESH:', error);
+    Alert.alert(
+      '❌ CRITICAL ERROR', 
+      `FCM Token refresh failed:\n\n${error.message}\n\nCheck Firebase configuration and app permissions.`
+    );
+    return null;
+  }
+};
+
+
+
+// In your Screen1.tsx or Notifications.tsx
+const registerFCMToken = async (driverId: string, fcmToken: string) => {
+  try {
+    const payload = {
+      driverId,
+      fcmToken,
+      platform: Platform.OS,
+      appVersion: '1.0.0'
+    };
+
+    const response = await fetch(`${API_BASE_URL}/register-fcm-token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    
+    if (!data.success) {
+      if (data.error.includes('Driver is not defined') || data.error.includes('Driver not found')) {
+        console.warn('Driver record issue, retrying in 5 seconds...');
+        // Retry after 5 seconds
+        setTimeout(() => registerFCMToken(driverId, fcmToken), 5000);
+        return;
+      }
+      throw new Error(data.error);
+    }
+    
+    console.log('✅ FCM token registered successfully');
+  } catch (error) {
+    console.error('❌ FCM registration failed:', error);
+    // Implement fallback logic or show user message
+  }
+};
+
+
+
+// Add this helper function
+const createTestDriver = async (fcmToken: string) => {
+  try {
+    console.log('🚀 Creating test driver...');
+    
+    const response = await fetch(`${API_BASE}/api/test/create-test-driver`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const result = await response.json();
+    console.log('📱 Test driver creation result:', result);
+
+    if (result.success) {
+      console.log('✅ Test driver created, retrying FCM registration...');
+      // Retry FCM registration
+      await sendFCMTokenToServer(fcmToken);
+    }
+  } catch (error) {
+    console.error('❌ Error creating test driver:', error);
+  }
+};
 
 // Enhanced online status toggle
 const toggleOnlineStatus = async () => {
@@ -5308,13 +5495,14 @@ useEffect(() => {
   }
 }, [driverId]);
 
-  // 🆕 FCM: Handle notification ride request
-  // In Screen1.tsx, enhance the notification handler
+  
+// In Screen1.tsx - Enhanced notification handler
 const handleNotificationRideRequest = useCallback((data: any) => {
-  console.log('📱 Received ride request via notification:', data);
+  console.log('\n📱 ===== 🚖 NEW RIDE REQUEST RECEIVED IN DRIVER APP ===== 🚖');
+  console.log('📦 Raw notification data:', JSON.stringify(data, null, 2));
   
   if (!data || data.type !== 'ride_request') {
-    console.error('Invalid ride request payload:', data);
+    console.error('❌ INVALID RIDE REQUEST PAYLOAD:', data);
     return;
   }
 
@@ -5339,28 +5527,48 @@ const handleNotificationRideRequest = useCallback((data: any) => {
     userMobile: data.userMobile || "N/A",
   };
 
-  console.log('📱 Processed ride data:', rideData);
+  console.log('✅ PROCESSED RIDE DATA:');
+  console.log('   🆔 Ride ID:', rideData.rideId);
+  console.log('   🆔 RAID ID:', rideData.RAID_ID);
+  console.log('   👤 Customer:', rideData.userName);
+  console.log('   📞 Mobile:', rideData.userMobile);
+  console.log('   📍 Pickup:', rideData.pickup.address);
+  console.log('   🎯 Drop:', rideData.drop.address);
+  console.log('   💰 Fare:', rideData.fare);
+  console.log('   📏 Distance:', rideData.distance);
+  console.log('   🔢 OTP:', rideData.otp);
+  console.log('   📍 Pickup Coords:', `${rideData.pickup.latitude}, ${rideData.pickup.longitude}`);
+  console.log('   🎯 Drop Coords:', `${rideData.drop.latitude}, ${rideData.drop.longitude}`);
+
+  console.log('🎯 SHOWING RIDE REQUEST ALERT TO DRIVER...');
   
   // Show the ride request alert
   Alert.alert(
     "🚖 New Ride Request!",
-    `📍 Pickup: ${rideData.pickup.address}\n🎯 Drop: ${rideData.drop.address}\n💰 Fare: ₹${rideData.fare}\n📏 Distance: ${rideData.distance}\n👤 Customer: ${rideData.userName}`,
+    `👤 Customer: ${rideData.userName}\n📞 Mobile: ${rideData.userMobile}\n📍 Pickup: ${rideData.pickup.address}\n🎯 Drop: ${rideData.drop.address}\n💰 Fare: ₹${rideData.fare}\n📏 Distance: ${rideData.distance}\n🔢 OTP: ${rideData.otp}`,
     [
       {
         text: "❌ Reject",
-        onPress: () => rejectRide(rideData.rideId),
+        onPress: () => {
+          console.log('❌ DRIVER REJECTED THE RIDE:', rideData.rideId);
+          rejectRide(rideData.rideId);
+        },
         style: "destructive",
       },
       {
         text: "✅ Accept",
-        onPress: () => acceptRide(rideData.rideId),
+        onPress: () => {
+          console.log('✅ DRIVER ACCEPTED THE RIDE:', rideData.rideId);
+          acceptRide(rideData.rideId);
+        },
       },
     ],
     { cancelable: false }
   );
-}, [location]);
-  
 
+  console.log('✅ RIDE REQUEST PROCESSING COMPLETED IN DRIVER APP');
+  console.log('================================================\n');
+}, [location]);
 
 
 const updateDriverOnlineStatus = async (isOnline: boolean) => {
@@ -6640,9 +6848,9 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
       
 
 {isDriverOnline && (
-  <View>
+  <View style={styles.testButtonsContainer}>
     <TouchableOpacity
-      style={styles.soundTestButton}
+      style={styles.testButton}
       onPress={async () => {
         try {
           await NotificationService.testNotification();
@@ -6652,11 +6860,11 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
         }
       }}
     >
-      <Text style={styles.soundTestButtonText}>🔊 Test Sound</Text>
+      <Text style={styles.testButtonText}>🔊 Test Sound</Text>
     </TouchableOpacity>
     
     <TouchableOpacity
-      style={[styles.soundTestButton, { backgroundColor: '#2196F3', marginTop: 8 }]}
+      style={[styles.testButton, { backgroundColor: '#2196F3' }]}
       onPress={async () => {
         try {
           console.log('🔄 Manually registering FCM token...');
@@ -6676,10 +6884,33 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
         }
       }}
     >
-      <Text style={styles.soundTestButtonText}>🔑 Register FCM Token</Text>
+      <Text style={styles.testButtonText}>🔑 Register FCM Token</Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+      style={[styles.testButton, { backgroundColor: '#FF9800' }]}
+      onPress={async () => {
+        try {
+          console.log('🧪 Creating test driver...');
+          const response = await fetch(`${API_BASE}/api/test/create-test-driver`, {
+            method: 'POST',
+          });
+          const result = await response.json();
+          Alert.alert(
+            result.success ? '✅ Success' : '❌ Failed',
+            result.message || 'Unknown error'
+          );
+        } catch (error) {
+          console.error('❌ Test driver creation failed:', error);
+          Alert.alert('❌ Error', 'Failed to create test driver');
+        }
+      }}
+    >
+      <Text style={styles.testButtonText}>👤 Create Test Driver</Text>
     </TouchableOpacity>
   </View>
 )}
+
 
       {/* 🆕 Online/Offline Toggle Button */}
       {!ride && (
@@ -6986,6 +7217,29 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
 export default DriverScreen;
 
 const styles = StyleSheet.create({
+
+    testButtonsContainer: {
+    position: 'absolute',
+    top: 180,
+    right: 16,
+    left: 16,
+  },
+  testButton: {
+    backgroundColor: '#FF6B35',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    elevation: 3,
+    alignItems: 'center',
+  },
+  testButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+
+
+
   soundTestButton: {
   position: 'absolute',
   top: 180,
