@@ -5192,132 +5192,199 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
     };
   }, [driverStatus, driverId, hasNotificationPermission]);
   
-  // 🆕 FCM: Send token to server
-  const sendFCMTokenToServer = async (token: string): Promise<boolean> => {
-    try {
-      const authToken = await AsyncStorage.getItem("authToken");
-      if (!authToken) {
-        console.log('❌ No auth token available');
-        return false;
-      }
-      console.log('📤 Sending FCM token to server...');
-     
-      // Use the correct endpoint - adjust as per your backend
-      const response = await fetch(`${API_BASE}/drivers/update-fcm-token`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({
-          driverId: driverId,
-          fcmToken: token,
-          platform: Platform.OS
-        }),
-      });
-     
-      console.log('📡 Response status:', response.status);
-     
-      if (response.ok) {
-        const result = await response.json();
-        console.log('✅ FCM token updated on server:', result);
-        return true;
-      } else {
-        const errorText = await response.text();
-        console.log('❌ Server error:', response.status, errorText);
-        return false;
-      }
-    } catch (error) {
-      console.error('❌ Network error sending token:', error);
+
+
+  // DriverScreen.tsx - FIXED FCM token registration
+const sendFCMTokenToServer = async (token: string): Promise<boolean> => {
+  try {
+    const authToken = await AsyncStorage.getItem("authToken");
+    if (!authToken) {
+      console.log('❌ No auth token available for FCM registration');
       return false;
     }
-  };
-  
-  // 🆕 FCM: Handle notification ride request
-  const handleNotificationRideRequest = (data: any) => {
-    console.log('📱 Received ride request via notification:', data);
-   
-    if (!data || data.type !== 'ride_request') {
-      console.error('Invalid ride request payload:', data);
-      return;
+
+    console.log('📤 Registering FCM token with server...', token.substring(0, 20) + '...');
+
+    // Use the correct endpoint and data structure
+    const response = await fetch(`${API_BASE}/api/drivers/update-fcm-token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        driverId: driverId, // Make sure driverId is available
+        fcmToken: token,
+        platform: Platform.OS,
+        appVersion: '1.0.0',
+        timestamp: new Date().toISOString()
+      }),
+    });
+
+    const responseData = await response.json();
+    console.log('📱 Server response for FCM registration:', responseData);
+
+    if (response.ok && responseData.success) {
+      console.log('✅ FCM token registered on server successfully');
+      return true;
+    } else {
+      console.log('❌ Server error registering FCM token:', responseData.message || response.statusText);
+      return false;
     }
-   
-    const rideData: RideType = {
-      rideId: data.rideId,
-      RAID_ID: data.RAID_ID || "N/A",
-      otp: data.otp || "0000",
-      pickup: {
-        latitude: data.pickup?.lat || data.pickup?.latitude || 0,
-        longitude: data.pickup?.lng || data.pickup?.longitude || 0,
-        address: data.pickup?.address || "Unknown location",
-      },
-      drop: {
-        latitude: data.drop?.lat || data.drop?.latitude || 0,
-        longitude: data.drop?.lng || data.drop?.longitude || 0,
-        address: data.drop?.address || "Unknown location",
-      },
-      fare: data.fare || 0,
-      distance: data.distance || "0 km",
-      userName: data.userName || data.customerName || "Customer",
-      userMobile: data.userMobile || "N/A",
-    };
-   
-    console.log('📱 Processed ride data:', rideData);
-    handleRideRequest(rideData);
-  };
-  
-  // 🆕 Toggle Online/Offline Status
-  const toggleOnlineStatus = async () => {
-    try {
-      // Toggle online status
-      const newOnlineStatus = !isDriverOnline;
-      setIsDriverOnline(newOnlineStatus);
+  } catch (error) {
+    console.error('❌ Network error registering FCM token:', error);
+    return false;
+  }
+};
+
+
+// Enhanced online status toggle
+const toggleOnlineStatus = async () => {
+  try {
+    if (isDriverOnline) {
+      // Going offline
+      console.log('🔴 Going offline...');
+      setIsDriverOnline(false);
+      setDriverStatus("offline");
+      stopBackgroundLocationTracking();
       
-      if (newOnlineStatus) {
-        setDriverStatus("online");
-        // Start background location tracking
-        startBackgroundLocationTracking();
-        
-        // Initialize notifications if not already done
-        if (!hasNotificationPermission) {
-          const initialized = await NotificationService.initializeNotifications();
-          
-          if (initialized) {
-            const token = await NotificationService.getFCMToken();
-            if (token && driverId) {
-              await sendFCMTokenToServer(token);
-            }
-            
-            // Set up listeners
-            NotificationService.on('rideRequest', handleNotificationRideRequest);
-            NotificationService.on('tokenRefresh', async (newToken) => {
-              console.log('🔄 FCM token refreshed, updating server...');
-              if (driverId) {
-                await sendFCMTokenToServer(newToken);
-              }
-            });
-            
-            setHasNotificationPermission(true);
-            console.log('✅ FCM initialized');
-          } else {
-            console.log('❌ Notification system initialization failed');
-            setHasNotificationPermission(false);
-          }
+      // Update server status
+      await updateDriverOnlineStatus(false);
+    } else {
+      // Going online
+      console.log('🟢 Going online...');
+      setIsDriverOnline(true);
+      setDriverStatus("online");
+      
+      // Start location tracking
+      startBackgroundLocationTracking();
+      
+      // Register FCM token when going online
+      const token = await NotificationService.getFCMToken();
+      if (token) {
+        console.log('📱 Registering FCM token for online driver...');
+        const registered = await sendFCMTokenToServer(token);
+        if (registered) {
+          console.log('✅ FCM token registered successfully for online driver');
+        } else {
+          console.log('⚠️ FCM token registration failed, but continuing online');
         }
-      } else {
-        setDriverStatus("offline");
-        // Stop background location tracking
-        stopBackgroundLocationTracking();
       }
       
-      // Save online status to AsyncStorage
-      await AsyncStorage.setItem("driverOnlineStatus", newOnlineStatus ? "online" : "offline");
+      // Update server status
+      await updateDriverOnlineStatus(true);
+    }
+  } catch (error) {
+    console.error('❌ Error toggling online status:', error);
+  }
+};
+  
+
+
+
+// Auto-register FCM token on app start
+useEffect(() => {
+  const initializeFCMOnStart = async () => {
+    try {
+      console.log('🚀 Initializing FCM on app start...');
+      
+      // Get FCM token
+      const token = await NotificationService.getFCMToken();
+      if (token && driverId) {
+        console.log('📱 Auto-registering FCM token on app start...');
+        const registered = await sendFCMTokenToServer(token);
+        if (registered) {
+          console.log('✅ FCM token auto-registered on app start');
+        }
+      }
     } catch (error) {
-      console.error("❌ Error toggling online status:", error);
-      Alert.alert("Error", "Failed to change status. Please try again.");
+      console.error('❌ Error auto-registering FCM token:', error);
     }
   };
+
+  // Initialize when driver info is loaded
+  if (driverId) {
+    initializeFCMOnStart();
+  }
+}, [driverId]);
+
+  // 🆕 FCM: Handle notification ride request
+  // In Screen1.tsx, enhance the notification handler
+const handleNotificationRideRequest = useCallback((data: any) => {
+  console.log('📱 Received ride request via notification:', data);
   
+  if (!data || data.type !== 'ride_request') {
+    console.error('Invalid ride request payload:', data);
+    return;
+  }
+
+  // Ensure all required fields exist with fallbacks
+  const rideData: RideType = {
+    rideId: data.rideId || `RIDE_${Date.now()}`,
+    RAID_ID: data.RAID_ID || "N/A",
+    otp: data.otp || "0000",
+    pickup: {
+      latitude: data.pickup?.lat || data.pickup?.latitude || (location?.latitude || 0),
+      longitude: data.pickup?.lng || data.pickup?.longitude || (location?.longitude || 0),
+      address: data.pickup?.address || "Unknown pickup location",
+    },
+    drop: {
+      latitude: data.drop?.lat || data.drop?.latitude || (location?.latitude || 0),
+      longitude: data.drop?.lng || data.drop?.longitude || (location?.longitude || 0),
+      address: data.drop?.address || "Unknown drop location",
+    },
+    fare: data.fare || 0,
+    distance: data.distance || "0 km",
+    userName: data.userName || data.customerName || "Customer",
+    userMobile: data.userMobile || "N/A",
+  };
+
+  console.log('📱 Processed ride data:', rideData);
+  
+  // Show the ride request alert
+  Alert.alert(
+    "🚖 New Ride Request!",
+    `📍 Pickup: ${rideData.pickup.address}\n🎯 Drop: ${rideData.drop.address}\n💰 Fare: ₹${rideData.fare}\n📏 Distance: ${rideData.distance}\n👤 Customer: ${rideData.userName}`,
+    [
+      {
+        text: "❌ Reject",
+        onPress: () => rejectRide(rideData.rideId),
+        style: "destructive",
+      },
+      {
+        text: "✅ Accept",
+        onPress: () => acceptRide(rideData.rideId),
+      },
+    ],
+    { cancelable: false }
+  );
+}, [location]);
+  
+
+
+
+const updateDriverOnlineStatus = async (isOnline: boolean) => {
+  try {
+    const response = await fetch(`${API_BASE}/api/drivers/online-status`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${await AsyncStorage.getItem('authToken')}`,
+      },
+      body: JSON.stringify({
+        driverId,
+        isOnline,
+        location: location || { latitude: 0, longitude: 0 }
+      }),
+    });
+    
+    console.log(`📡 Online status update: ${isOnline ? 'ONLINE' : 'OFFLINE'} - ${response.status}`);
+  } catch (error) {
+    console.error('❌ Error updating online status:', error);
+  }
+};
+
+
   // Load driver info and verify token on mount
   useEffect(() => {
     const loadDriverInfo = async () => {
@@ -6571,6 +6638,49 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
         )}
       </MapView>
       
+
+{isDriverOnline && (
+  <View>
+    <TouchableOpacity
+      style={styles.soundTestButton}
+      onPress={async () => {
+        try {
+          await NotificationService.testNotification();
+          console.log('🔊 Sound test triggered');
+        } catch (error) {
+          console.error('❌ Sound test failed:', error);
+        }
+      }}
+    >
+      <Text style={styles.soundTestButtonText}>🔊 Test Sound</Text>
+    </TouchableOpacity>
+    
+    <TouchableOpacity
+      style={[styles.soundTestButton, { backgroundColor: '#2196F3', marginTop: 8 }]}
+      onPress={async () => {
+        try {
+          console.log('🔄 Manually registering FCM token...');
+          const token = await NotificationService.getFCMToken();
+          if (token) {
+            const registered = await sendFCMTokenToServer(token);
+            Alert.alert(
+              registered ? '✅ Success' : '❌ Failed',
+              registered ? 'FCM token registered!' : 'Failed to register FCM token'
+            );
+          } else {
+            Alert.alert('❌ Error', 'No FCM token available');
+          }
+        } catch (error) {
+          console.error('❌ Manual FCM registration failed:', error);
+          Alert.alert('❌ Error', 'FCM registration failed');
+        }
+      }}
+    >
+      <Text style={styles.soundTestButtonText}>🔑 Register FCM Token</Text>
+    </TouchableOpacity>
+  </View>
+)}
+
       {/* 🆕 Online/Offline Toggle Button */}
       {!ride && (
         <View style={styles.onlineToggleContainer}>
@@ -6876,6 +6986,21 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
 export default DriverScreen;
 
 const styles = StyleSheet.create({
+  soundTestButton: {
+  position: 'absolute',
+  top: 180,
+  right: 16,
+  backgroundColor: '#FF6B35',
+  padding: 12,
+  borderRadius: 8,
+  elevation: 3,
+},
+soundTestButtonText: {
+  color: '#FFFFFF',
+  fontWeight: '600',
+  fontSize: 12,
+},
+
   container: {
     flex: 1,
     backgroundColor: "#f8f9fa",
