@@ -4767,15 +4767,6 @@
 
 
 
-
-
-
-
-
-
-
-
-
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
@@ -4792,17 +4783,17 @@ import {
   AppState,
   Linking,
 } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import Geolocation from "@react-native-community/geolocation";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_BASE } from "./apiConfig";
 import api from "../utils/api";
 import MaterialIcons from "react-native-vector-icons/MaterialIcons";
 import FontAwesome from "react-native-vector-icons/FontAwesome";
-import BackgroundTimer from 'react-native-background-timer';
-// Import the NotificationService
 import NotificationService from './Notifications';
 import messaging from '@react-native-firebase/messaging';
+import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions';
+import BackgroundJob from 'react-native-background-job';
 
 const { width, height } = Dimensions.get("window");
 
@@ -4854,13 +4845,13 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
     route.params?.driverName || ""
   );
   const [error, setError] = useState<string | null>(null);
- 
+  
   // Route handling states
   const [fullRouteCoords, setFullRouteCoords] = useState<LocationType[]>([]);
   const [visibleRouteCoords, setVisibleRouteCoords] = useState<LocationType[]>([]);
   const [nearestPointIndex, setNearestPointIndex] = useState(0);
   const [mapRegion, setMapRegion] = useState<any>(null);
- 
+  
   // New states for verification and bill
   const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [showBillModal, setShowBillModal] = useState(false);
@@ -4880,15 +4871,16 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
   });
   const [otpSharedTime, setOtpSharedTime] = useState<Date | null>(null);
   const [currentSpeed, setCurrentSpeed] = useState<number>(0);
-  // 🆕 NEW: Online/Offline toggle state
+  
+  // Online/Offline toggle state
   const [isDriverOnline, setIsDriverOnline] = useState(false);
   const [backgroundTrackingActive, setBackgroundTrackingActive] = useState(false);
- 
-  // 🆕 FCM Notification states
+  
+  // FCM Notification states
   const [hasNotificationPermission, setHasNotificationPermission] = useState(false);
   const [isBackgroundMode, setIsBackgroundMode] = useState(false);
   
-  // 🆕 Animation states
+  // Animation states
   const [displayedDriverLocation, setDisplayedDriverLocation] = useState<LocationType | null>(null);
   const [displayedUserLocation, setDisplayedUserLocation] = useState<LocationType | null>(null);
   
@@ -4929,90 +4921,19 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
     return R * c * 1000; // Distance in meters
   };
   
-  // 🆕 Smooth driver marker animation function
+  // Smooth driver marker animation function
   const animateDriverMarker = useCallback((latitude: number, longitude: number, heading: number = 0) => {
-    if (!driverMarkerRef.current || !isMountedRef.current) return;
-
+    if (!isMountedRef.current) return;
     const newCoordinate = { latitude, longitude };
-
-    // 1️⃣ Calculate driver movement distance
-    const prev = displayedDriverLocation;
-    let distanceMoved = 0;
-    if (prev) {
-      const R = 6371e3;
-      const φ1 = prev.latitude * Math.PI / 180;
-      const φ2 = latitude * Math.PI / 180;
-      const Δφ = (latitude - prev.latitude) * Math.PI / 180;
-      const Δλ = (longitude - prev.longitude) * Math.PI / 180;
-      const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-                Math.cos(φ1) * Math.cos(φ2) *
-                Math.sin(Δλ/2) * Math.sin(Δλ/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      distanceMoved = R * c; // meters
-    }
-
-    // 2️⃣ If driver not moved -> skip animation
-    if (distanceMoved < 1) return; 
-
-    // 3️⃣ Animation duration dynamic based on speed - INCREASED DURATION
-    let animationDuration = 6000; // Increased to 6 seconds default
-    if (currentSpeed > 0) {
-      if (currentSpeed < 10) animationDuration = 7000; // slow - smooth
-      else if (currentSpeed < 30) animationDuration = 5000; // medium
-      else animationDuration = 3000; // fast driver
-    }
-
-    // 4️⃣ Animate marker (Android)
-    if (Platform.OS === 'android' && driverMarkerRef.current) {
-      driverMarkerRef.current.animateMarkerToCoordinate(newCoordinate, animationDuration);
-    } else {
-      setDisplayedDriverLocation(newCoordinate);
-    }
-
-    if (heading !== 0) {
-      console.log(`🧭 Marker heading: ${heading}°`);
-    }
-
-    // Update displayed location for next comparison
     setDisplayedDriverLocation(newCoordinate);
-  }, [currentSpeed, displayedDriverLocation]);
+  }, []);
 
-  // 🆕 Smooth user marker animation function
+  // Smooth user marker animation function
   const animateUserMarker = useCallback((latitude: number, longitude: number) => {
-    if (!userMarkerRef.current || !isMountedRef.current) return;
-
+    if (!isMountedRef.current) return;
     const newCoordinate = { latitude, longitude };
-
-    // Calculate user movement distance
-    const prev = displayedUserLocation;
-    let distanceMoved = 0;
-    if (prev) {
-      const R = 6371e3;
-      const φ1 = prev.latitude * Math.PI / 180;
-      const φ2 = latitude * Math.PI / 180;
-      const Δφ = (latitude - prev.latitude) * Math.PI / 180;
-      const Δλ = (longitude - prev.longitude) * Math.PI / 180;
-      const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-                Math.cos(φ1) * Math.cos(φ2) *
-                Math.sin(Δλ/2) * Math.sin(Δλ/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      distanceMoved = R * c;
-    }
-
-    // Skip animation if minimal movement
-    if (distanceMoved < 1) return;
-
-    // Smooth animation for user marker
-    const animationDuration = 3000; // 3 seconds for smooth user movement
-
-    if (Platform.OS === 'android' && userMarkerRef.current) {
-      userMarkerRef.current.animateMarkerToCoordinate(newCoordinate, animationDuration);
-    } else {
-      setDisplayedUserLocation(newCoordinate);
-    }
-
     setDisplayedUserLocation(newCoordinate);
-  }, [displayedUserLocation]);
+  }, []);
   
   // Cleanup on unmount
   useEffect(() => {
@@ -5035,18 +4956,10 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
       // Clean up notification listeners
       NotificationService.off('rideRequest', handleNotificationRideRequest);
       NotificationService.off('tokenRefresh', () => {});
-      // Clean up FCM token refresh listener
-      const unsubscribeTokenRefresh = messaging().onTokenRefresh(async (newToken) => {
-        console.log('🔄 FCM token refreshed:', newToken);
-        if (driverId) {
-          await sendFCMTokenToServer(newToken);
-        }
-      });
-      unsubscribeTokenRefresh();
     };
   }, []);
   
-  // 🆕 Background location tracking with regular geolocation
+  // Background location tracking
   const startBackgroundLocationTracking = useCallback(() => {
     console.log("🔄 Starting background location tracking");
    
@@ -5069,7 +4982,7 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
         setLocation(newLocation);
         setCurrentSpeed(position.coords.speed || 0);
        
-        // 🆕 Animate driver marker smoothly
+        // Animate driver marker smoothly
         animateDriverMarker(newLocation.latitude, newLocation.longitude, position.coords.heading || 0);
        
         // Update distance if ride is active
@@ -5094,16 +5007,16 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
       },
       {
         enableHighAccuracy: true,
-        distanceFilter: 5, // 5 meters
-        interval: 3000, // 3 seconds
-        fastestInterval: 2000, // 2 seconds
+        distanceFilter: 5,
+        interval: 3000,
+        fastestInterval: 2000,
       }
     );
    
     setBackgroundTrackingActive(true);
   }, [isDriverOnline, lastCoord, rideStatus, animateDriverMarker]);
   
-  // 🆕 Stop background location tracking
+  // Stop background location tracking
   const stopBackgroundLocationTracking = useCallback(() => {
     console.log("🛑 Stopping background location tracking");
    
@@ -5120,7 +5033,7 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
     setBackgroundTrackingActive(false);
   }, []);
   
-  // 🆕 Handle app state changes for background tracking
+  // Handle app state changes for background tracking
   useEffect(() => {
     const handleAppStateChange = (nextAppState: string) => {
       if (nextAppState === 'background' && isDriverOnline) {
@@ -5129,8 +5042,6 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
       } else if (nextAppState === 'active' && isDriverOnline) {
         console.log("📱 App in foreground");
         setIsBackgroundMode(false);
-        // Check for pending notifications when app comes to foreground
-        NotificationService.checkPendingNotifications();
       }
     };
     
@@ -5140,7 +5051,7 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
     };
   }, [isDriverOnline]);
   
-  // 🆕 FCM: Initialize notification system
+  // FCM: Initialize notification system
   useEffect(() => {
     const initializeNotificationSystem = async () => {
       try {
@@ -5176,7 +5087,6 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
         }
       } catch (error) {
         console.error('❌ Error in notification system initialization:', error);
-        // Don't block the app if notifications fail
         setHasNotificationPermission(false);
       }
     };
@@ -5191,407 +5101,187 @@ const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) =>
       NotificationService.off('rideRequest', handleNotificationRideRequest);
     };
   }, [driverStatus, driverId, hasNotificationPermission]);
- 
- 
-  // In Screen1.tsx - Enhanced FCM token registration
-const sendFCMTokenToServer = async (token: string): Promise<boolean> => {
-  try {
-    console.log('\n🔑 ===== FCM TOKEN REGISTRATION PROCESS =====');
-    console.log('📱 Driver ID:', driverId);
-    console.log('🔑 FCM Token:', token.substring(0, 20) + '...');
-    console.log('📏 Token Length:', token.length);
-    console.log('📱 Platform:', Platform.OS);
 
-    const authToken = await AsyncStorage.getItem("authToken");
-    if (!authToken) {
-      console.log('❌ NO AUTH TOKEN AVAILABLE FOR FCM REGISTRATION');
-      return false;
-    }
-
-    if (!driverId) {
-      console.log('❌ NO DRIVER ID AVAILABLE FOR FCM REGISTRATION');
-      return false;
-    }
-
-    const payload = {
-      driverId: driverId,
-      fcmToken: token,
-      platform: Platform.OS,
-      appVersion: '1.0.0'
-    };
-
-    console.log('📦 Sending FCM registration payload:', payload);
-
-    const response = await fetch(`${API_BASE}/drivers/update-fcm-token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const responseText = await response.text();
-    console.log('📱 Server Response Status:', response.status);
-    console.log('📱 Server Response Raw:', responseText);
-
-    let responseData;
+  // Send FCM token to server
+  const sendFCMTokenToServer = async (token: string): Promise<boolean> => {
     try {
-      responseData = JSON.parse(responseText);
-    } catch (parseError) {
-      console.error('❌ SERVER RETURNED NON-JSON RESPONSE:', responseText);
-      return false;
-    }
-
-    console.log('📱 Server Response Parsed:', responseData);
-
-    if (response.ok && responseData.success) {
-      console.log('✅ FCM TOKEN REGISTERED ON SERVER SUCCESSFULLY');
-      console.log('✅ Driver:', responseData.driverId);
-      console.log('✅ Name:', responseData.name);
-      console.log('✅ Token Updated:', responseData.tokenUpdated);
-      console.log('================================================\n');
-      return true;
-    } else {
-      console.log('❌ SERVER ERROR REGISTERING FCM TOKEN:', responseData.error || responseData.message);
-      console.log('================================================\n');
-      return false;
-    }
-  } catch (error) {
-    console.error('❌ NETWORK ERROR REGISTERING FCM TOKEN:', error);
-    console.log('================================================\n');
-    return false;
-  }
-};
-
-
-
-
-const forceRefreshFCMToken = async () => {
-  try {
-    console.log('\n🔄 ===== FORCE FCM TOKEN REFRESH PROCESS =====');
-    console.log('📱 Driver ID:', driverId);
-    console.log('🔐 Checking FCM permissions...');
-
-    // Check and request permissions first
-    const authStatus = await messaging().hasPermission();
-    console.log('🔐 Current Permission Status:', authStatus);
-
-    if (authStatus === messaging.AuthorizationStatus.NOT_DETERMINED) {
-      console.log('🔐 Requesting notification permission...');
-      const newStatus = await messaging().requestPermission();
-      console.log('🔐 New Permission Status:', newStatus);
-    }
-
-    console.log('🗑️ Deleting old FCM token...');
-    
-    // Delete current token
-    try {
-      await messaging().deleteToken();
-      console.log('✅ Old FCM token deleted successfully');
-    } catch (deleteError) {
-      console.log('⚠️ Could not delete old token (might already be invalid):', deleteError);
-    }
-
-    console.log('🔑 Generating NEW FCM token...');
-    
-    // Get new token with retry logic
-    let newToken: string | null = null;
-    let retryCount = 0;
-    
-    while (!newToken && retryCount < 3) {
+      console.log('\n🔑 ===== FCM TOKEN REGISTRATION PROCESS =====');
+      console.log('📱 Driver ID:', driverId);
+      console.log('🔑 FCM Token:', token.substring(0, 20) + '...');
+      const authToken = await AsyncStorage.getItem("authToken");
+      if (!authToken) {
+        console.log('❌ NO AUTH TOKEN AVAILABLE FOR FCM REGISTRATION');
+        return false;
+      }
+      if (!driverId) {
+        console.log('❌ NO DRIVER ID AVAILABLE FOR FCM REGISTRATION');
+        return false;
+      }
+      const payload = {
+        driverId: driverId,
+        fcmToken: token,
+        platform: Platform.OS,
+        appVersion: '1.0.0'
+      };
+      console.log('📦 Sending FCM registration payload:', payload);
+      const response = await fetch(`${API_BASE}/drivers/update-fcm-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      const responseText = await response.text();
+      console.log('📱 Server Response Status:', response.status);
+      let responseData;
       try {
-        newToken = await messaging().getToken();
-        if (!newToken) {
-          retryCount++;
-          console.log(`🔄 Retry ${retryCount}/3: Waiting for token...`);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      } catch (tokenError) {
-        console.error(`❌ Token generation error (attempt ${retryCount + 1}):`, tokenError);
-        retryCount++;
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        responseData = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('❌ SERVER RETURNED NON-JSON RESPONSE:', responseText);
+        return false;
       }
-    }
-
-    if (newToken) {
-      console.log('🎉 NEW FCM TOKEN GENERATED SUCCESSFULLY!');
-      console.log('🔑 Token:', newToken);
-      console.log('📏 Length:', newToken.length);
-      console.log('🔍 Token Preview:', `${newToken.substring(0, 15)}...${newToken.slice(-10)}`);
-
-      console.log('📤 Registering new token with server...');
-      
-      // Register with server
-      const registered = await sendFCMTokenToServer(newToken);
-      
-      if (registered) {
-        console.log('✅ NEW FCM TOKEN REGISTERED WITH SERVER!');
-        
-        Alert.alert(
-          '✅ SUCCESS!', 
-          `New FCM token registered successfully!\n\nToken Preview: ${newToken.substring(0, 15)}...\nLength: ${newToken.length} characters\n\nTesting the token now...`
-        );
-        
-        // Test the new token immediately
-        setTimeout(() => {
-          testNewFCMToken(newToken!);
-        }, 3000);
+      console.log('📱 Server Response Parsed:', responseData);
+      if (response.ok && responseData.success) {
+        console.log('✅ FCM TOKEN REGISTERED ON SERVER SUCCESSFULLY');
+        return true;
       } else {
-        Alert.alert('❌ REGISTRATION FAILED', 'Failed to register new FCM token with server. Check server logs.');
-      }
-    } else {
-      console.log('❌ FAILED TO GENERATE NEW FCM TOKEN AFTER 3 ATTEMPTS');
-      Alert.alert(
-        '❌ TOKEN GENERATION FAILED', 
-        'Could not generate new FCM token. Please check:\n\n1. Internet connection\n2. Firebase configuration\n3. App permissions'
-      );
-    }
-    
-    return newToken;
-  } catch (error) {
-    console.error('❌ CRITICAL ERROR IN FCM TOKEN REFRESH:', error);
-    Alert.alert(
-      '❌ CRITICAL ERROR', 
-      `FCM Token refresh failed:\n\n${error.message}\n\nCheck Firebase configuration and app permissions.`
-    );
-    return null;
-  }
-};
-
-
-
-// In your Screen1.tsx or Notifications.tsx
-const registerFCMToken = async (driverId: string, fcmToken: string) => {
-  try {
-    const payload = {
-      driverId,
-      fcmToken,
-      platform: Platform.OS,
-      appVersion: '1.0.0'
-    };
-
-    const response = await fetch(`${API_BASE_URL}/register-fcm-token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const data = await response.json();
-    
-    if (!data.success) {
-      if (data.error.includes('Driver is not defined') || data.error.includes('Driver not found')) {
-        console.warn('Driver record issue, retrying in 5 seconds...');
-        // Retry after 5 seconds
-        setTimeout(() => registerFCMToken(driverId, fcmToken), 5000);
-        return;
-      }
-      throw new Error(data.error);
-    }
-    
-    console.log('✅ FCM token registered successfully');
-  } catch (error) {
-    console.error('❌ FCM registration failed:', error);
-    // Implement fallback logic or show user message
-  }
-};
-
-
-
-// Add this helper function
-const createTestDriver = async (fcmToken: string) => {
-  try {
-    console.log('🚀 Creating test driver...');
-    
-    const response = await fetch(`${API_BASE}/api/test/create-test-driver`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    const result = await response.json();
-    console.log('📱 Test driver creation result:', result);
-
-    if (result.success) {
-      console.log('✅ Test driver created, retrying FCM registration...');
-      // Retry FCM registration
-      await sendFCMTokenToServer(fcmToken);
-    }
-  } catch (error) {
-    console.error('❌ Error creating test driver:', error);
-  }
-};
-
-// Enhanced online status toggle
-const toggleOnlineStatus = async () => {
-  try {
-    if (isDriverOnline) {
-      // Going offline
-      console.log('🔴 Going offline...');
-      setIsDriverOnline(false);
-      setDriverStatus("offline");
-      stopBackgroundLocationTracking();
-      
-      // Update server status
-      await updateDriverOnlineStatus(false);
-    } else {
-      // Going online
-      console.log('🟢 Going online...');
-      setIsDriverOnline(true);
-      setDriverStatus("online");
-      
-      // Start location tracking
-      startBackgroundLocationTracking();
-      
-      // Register FCM token when going online
-      const token = await NotificationService.getFCMToken();
-      if (token) {
-        console.log('📱 Registering FCM token for online driver...');
-        const registered = await sendFCMTokenToServer(token);
-        if (registered) {
-          console.log('✅ FCM token registered successfully for online driver');
-        } else {
-          console.log('⚠️ FCM token registration failed, but continuing online');
-        }
-      }
-      
-      // Update server status
-      await updateDriverOnlineStatus(true);
-    }
-  } catch (error) {
-    console.error('❌ Error toggling online status:', error);
-  }
-};
-  
-
-
-
-// Auto-register FCM token on app start
-useEffect(() => {
-  const initializeFCMOnStart = async () => {
-    try {
-      console.log('🚀 Initializing FCM on app start...');
-      
-      // Get FCM token
-      const token = await NotificationService.getFCMToken();
-      if (token && driverId) {
-        console.log('📱 Auto-registering FCM token on app start...');
-        const registered = await sendFCMTokenToServer(token);
-        if (registered) {
-          console.log('✅ FCM token auto-registered on app start');
-        }
+        console.log('❌ SERVER ERROR REGISTERING FCM TOKEN:', responseData.error || responseData.message);
+        return false;
       }
     } catch (error) {
-      console.error('❌ Error auto-registering FCM token:', error);
+      console.error('❌ NETWORK ERROR REGISTERING FCM TOKEN:', error);
+      return false;
     }
   };
 
-  // Initialize when driver info is loaded
-  if (driverId) {
-    initializeFCMOnStart();
-  }
-}, [driverId]);
-
-  
-// In Screen1.tsx - Enhanced notification handler
-const handleNotificationRideRequest = useCallback((data: any) => {
-  console.log('\n📱 ===== 🚖 NEW RIDE REQUEST RECEIVED IN DRIVER APP ===== 🚖');
-  console.log('📦 Raw notification data:', JSON.stringify(data, null, 2));
-  
-  if (!data || data.type !== 'ride_request') {
-    console.error('❌ INVALID RIDE REQUEST PAYLOAD:', data);
-    return;
-  }
-
-  // Ensure all required fields exist with fallbacks
-  const rideData: RideType = {
-    rideId: data.rideId || `RIDE_${Date.now()}`,
-    RAID_ID: data.RAID_ID || "N/A",
-    otp: data.otp || "0000",
-    pickup: {
-      latitude: data.pickup?.lat || data.pickup?.latitude || (location?.latitude || 0),
-      longitude: data.pickup?.lng || data.pickup?.longitude || (location?.longitude || 0),
-      address: data.pickup?.address || "Unknown pickup location",
-    },
-    drop: {
-      latitude: data.drop?.lat || data.drop?.latitude || (location?.latitude || 0),
-      longitude: data.drop?.lng || data.drop?.longitude || (location?.longitude || 0),
-      address: data.drop?.address || "Unknown drop location",
-    },
-    fare: data.fare || 0,
-    distance: data.distance || "0 km",
-    userName: data.userName || data.customerName || "Customer",
-    userMobile: data.userMobile || "N/A",
+  // Enhanced online status toggle
+  const toggleOnlineStatus = async () => {
+    try {
+      if (isDriverOnline) {
+        // Going offline
+        console.log('🔴 Going offline...');
+        setIsDriverOnline(false);
+        setDriverStatus("offline");
+        stopBackgroundLocationTracking();
+        
+        // Update server status
+        await updateDriverOnlineStatus(false);
+      } else {
+        // Going online
+        console.log('🟢 Going online...');
+        setIsDriverOnline(true);
+        setDriverStatus("online");
+        
+        // Start location tracking
+        startBackgroundLocationTracking();
+        
+        // Register FCM token when going online
+        const token = await NotificationService.getFCMToken();
+        if (token) {
+          console.log('📱 Registering FCM token for online driver...');
+          const registered = await sendFCMTokenToServer(token);
+          if (registered) {
+            console.log('✅ FCM token registered successfully for online driver');
+          } else {
+            console.log('⚠️ FCM token registration failed, but continuing online');
+          }
+        }
+        
+        // Update server status
+        await updateDriverOnlineStatus(true);
+      }
+    } catch (error) {
+      console.error('❌ Error toggling online status:', error);
+    }
   };
 
-  console.log('✅ PROCESSED RIDE DATA:');
-  console.log('   🆔 Ride ID:', rideData.rideId);
-  console.log('   🆔 RAID ID:', rideData.RAID_ID);
-  console.log('   👤 Customer:', rideData.userName);
-  console.log('   📞 Mobile:', rideData.userMobile);
-  console.log('   📍 Pickup:', rideData.pickup.address);
-  console.log('   🎯 Drop:', rideData.drop.address);
-  console.log('   💰 Fare:', rideData.fare);
-  console.log('   📏 Distance:', rideData.distance);
-  console.log('   🔢 OTP:', rideData.otp);
-  console.log('   📍 Pickup Coords:', `${rideData.pickup.latitude}, ${rideData.pickup.longitude}`);
-  console.log('   🎯 Drop Coords:', `${rideData.drop.latitude}, ${rideData.drop.longitude}`);
-
-  console.log('🎯 SHOWING RIDE REQUEST ALERT TO DRIVER...');
-  
-  // Show the ride request alert
-  Alert.alert(
-    "🚖 New Ride Request!",
-    `👤 Customer: ${rideData.userName}\n📞 Mobile: ${rideData.userMobile}\n📍 Pickup: ${rideData.pickup.address}\n🎯 Drop: ${rideData.drop.address}\n💰 Fare: ₹${rideData.fare}\n📏 Distance: ${rideData.distance}\n🔢 OTP: ${rideData.otp}`,
-    [
-      {
-        text: "❌ Reject",
-        onPress: () => {
-          console.log('❌ DRIVER REJECTED THE RIDE:', rideData.rideId);
-          rejectRide(rideData.rideId);
+  // Update driver online status on server
+  const updateDriverOnlineStatus = async (isOnline: boolean) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/drivers/online-status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${await AsyncStorage.getItem('authToken')}`,
         },
-        style: "destructive",
-      },
-      {
-        text: "✅ Accept",
-        onPress: () => {
-          console.log('✅ DRIVER ACCEPTED THE RIDE:', rideData.rideId);
-          acceptRide(rideData.rideId);
-        },
-      },
-    ],
-    { cancelable: false }
-  );
+        body: JSON.stringify({
+          driverId,
+          isOnline,
+          location: location || { latitude: 0, longitude: 0 }
+        }),
+      });
+      
+      console.log(`📡 Online status update: ${isOnline ? 'ONLINE' : 'OFFLINE'} - ${response.status}`);
+    } catch (error) {
+      console.error('❌ Error updating online status:', error);
+    }
+  };
 
-  console.log('✅ RIDE REQUEST PROCESSING COMPLETED IN DRIVER APP');
-  console.log('================================================\n');
-}, [location]);
-
-
-const updateDriverOnlineStatus = async (isOnline: boolean) => {
-  try {
-    const response = await fetch(`${API_BASE}/api/drivers/online-status`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${await AsyncStorage.getItem('authToken')}`,
-      },
-      body: JSON.stringify({
-        driverId,
-        isOnline,
-        location: location || { latitude: 0, longitude: 0 }
-      }),
-    });
+  // Enhanced notification handler
+  const handleNotificationRideRequest = useCallback((data: any) => {
+    console.log('\n📱 ===== 🚖 NEW RIDE REQUEST RECEIVED IN DRIVER APP ===== 🚖');
+    console.log('📦 Raw notification data:', JSON.stringify(data, null, 2));
     
-    console.log(`📡 Online status update: ${isOnline ? 'ONLINE' : 'OFFLINE'} - ${response.status}`);
-  } catch (error) {
-    console.error('❌ Error updating online status:', error);
-  }
-};
-
+    if (!data || data.type !== 'ride_request') {
+      console.error('❌ INVALID RIDE REQUEST PAYLOAD:', data);
+      return;
+    }
+    // Ensure all required fields exist with fallbacks
+    const rideData: RideType = {
+      rideId: data.rideId || `RIDE_${Date.now()}`,
+      RAID_ID: data.RAID_ID || "N/A",
+      otp: data.otp || "0000",
+      pickup: {
+        latitude: data.pickup?.lat || data.pickup?.latitude || (location?.latitude || 0),
+        longitude: data.pickup?.lng || data.pickup?.longitude || (location?.longitude || 0),
+        address: data.pickup?.address || "Unknown pickup location",
+      },
+      drop: {
+        latitude: data.drop?.lat || data.drop?.latitude || (location?.latitude || 0),
+        longitude: data.drop?.lng || data.drop?.longitude || (location?.longitude || 0),
+        address: data.drop?.address || "Unknown drop location",
+      },
+      fare: data.fare || 0,
+      distance: data.distance || "0 km",
+      userName: data.userName || data.customerName || "Customer",
+      userMobile: data.userMobile || "N/A",
+    };
+    console.log('✅ PROCESSED RIDE DATA:');
+    console.log('   🆔 Ride ID:', rideData.rideId);
+    console.log('   👤 Customer:', rideData.userName);
+    console.log('   📍 Pickup:', rideData.pickup.address);
+    console.log('   🎯 Drop:', rideData.drop.address);
+    console.log('   💰 Fare:', rideData.fare);
+    console.log('   📏 Distance:', rideData.distance);
+    console.log('🎯 SHOWING RIDE REQUEST ALERT TO DRIVER...');
+    
+    // Show the ride request alert
+    Alert.alert(
+      "🚖 New Ride Request!",
+      `👤 Customer: ${rideData.userName}\n📞 Mobile: ${rideData.userMobile}\n📍 Pickup: ${rideData.pickup.address}\n🎯 Drop: ${rideData.drop.address}\n💰 Fare: ₹${rideData.fare}\n📏 Distance: ${rideData.distance}\n🔢 OTP: ${rideData.otp}`,
+      [
+        {
+          text: "❌ Reject",
+          onPress: () => {
+            console.log('❌ DRIVER REJECTED THE RIDE:', rideData.rideId);
+            rejectRide(rideData.rideId);
+          },
+          style: "destructive",
+        },
+        {
+          text: "✅ Accept",
+          onPress: () => {
+            console.log('✅ DRIVER ACCEPTED THE RIDE:', rideData.rideId);
+            acceptRide(rideData.rideId);
+          },
+        },
+      ],
+      { cancelable: false }
+    );
+    console.log('✅ RIDE REQUEST PROCESSING COMPLETED IN DRIVER APP');
+    console.log('================================================\n');
+  }, [location]);
 
   // Load driver info and verify token on mount
   useEffect(() => {
@@ -5612,7 +5302,6 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
           if (savedOnlineStatus === "online") {
             setIsDriverOnline(true);
             setDriverStatus("online");
-            // Start tracking (socket connect triggered by useEffect on isDriverOnline)
             startBackgroundLocationTracking();
           }
         
@@ -5675,7 +5364,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
     async (location: LocationType) => {
       try {
         locationUpdateCount.current++;
-        if (locationUpdateCount.current % 3 !== 0) { // Send every 3rd update
+        if (locationUpdateCount.current % 3 !== 0) {
           return;
         }
        
@@ -5706,7 +5395,6 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
         }
         
         if (socket && socket.connected && isDriverOnline) {
-          // 🆕 Emit as per requirement (updated to match friend's code)
           socket.emit('driverLocationUpdate', {
             driverId,
             latitude: location.latitude,
@@ -5737,7 +5425,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
     }
   }, [driverId, location, isRegistered, driverName, isDriverOnline]);
   
-  // 🆕 Route fetching with real-time updates - IMPROVED
+  // Route fetching with real-time updates
   const fetchRoute = useCallback(
     async (origin: LocationType, destination: LocationType) => {
       try {
@@ -5747,7 +5435,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
         });
        
         // Use Google Maps Directions API for accurate routing
-        const apiKey = "AIzaSyA9Ef953b2mO_rr940k-3OclHSZp3ldM2o"; // Using provided API key
+        const apiKey = "AIzaSyA9Ef953b2mO_rr940k-3OclHSZp3ldM2o";
         const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}&key=${apiKey}&mode=driving`;
         
         const response = await fetch(url);
@@ -5772,48 +5460,12 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
           return coords;
         } else {
           console.error("❌ No routes found in response");
-          // Fallback to OSRM if Google fails
-          return fetchOSRMRoute(origin, destination);
-        }
-      } catch (error) {
-        console.error("❌ Error fetching route with Google:", error);
-        // Fallback to OSRM
-        return fetchOSRMRoute(origin, destination);
-      }
-    },
-    []
-  );
-  
-  // Fallback to OSRM routing
-  const fetchOSRMRoute = useCallback(
-    async (origin: LocationType, destination: LocationType) => {
-      try {
-        console.log("🗺️ Using OSRM fallback for route between:", {
-          origin: { lat: origin.latitude, lng: origin.longitude },
-          destination: { lat: destination.latitude, lng: destination.longitude },
-        });
-        
-        const url = `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`;
-        const response = await fetch(url);
-        const data = await response.json();
-        
-        if (data.routes && data.routes.length > 0) {
-          const coords = data.routes[0].geometry.coordinates.map(
-            ([lng, lat]: number[]) => ({
-              latitude: lat,
-              longitude: lng,
-            })
-          );
-          console.log("✅ OSRM route fetched, coordinates count:", coords.length);
-          return coords;
-        } else {
-          console.error("❌ No OSRM routes found");
-          // Return a straight line route as last resort
+          // Fallback to straight line
           return [origin, destination];
         }
       } catch (error) {
-        console.error("❌ Error fetching OSRM route:", error);
-        // Return a straight line route as fallback
+        console.error("❌ Error fetching route with Google:", error);
+        // Fallback to straight line
         return [origin, destination];
       }
     },
@@ -5884,18 +5536,16 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
     []
   );
   
-  // 🆕 Update visible route as driver moves (Dynamic Polyline)
+  // Update visible route as driver moves (Dynamic Polyline)
   const updateVisibleRoute = useCallback(() => {
     if (!location || !fullRouteCoords.length) return;
    
     const nearestPoint = findNearestPointOnRoute(location, fullRouteCoords);
     if (!nearestPoint) return;
    
-    // Always update the visible route when driver moves
     const remainingRoute = fullRouteCoords.slice(nearestPoint.index);
   
     if (remainingRoute.length > 0) {
-      // Add current location to make the route more accurate
       const updatedRoute = [location, ...remainingRoute];
       setVisibleRouteCoords(updatedRoute);
       setNearestPointIndex(nearestPoint.index);
@@ -5910,17 +5560,17 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
    
     routeUpdateThrottle.current = setTimeout(() => {
       updateVisibleRoute();
-    }, 500); // friend's throttle
+    }, 500);
   }, [updateVisibleRoute]);
   
-  // 🆕 Automatically update route as driver moves
+  // Automatically update route as driver moves
   useEffect(() => {
     if (rideStatus === "started" && fullRouteCoords.length > 0) {
       throttledUpdateVisibleRoute();
     }
   }, [location, rideStatus, fullRouteCoords, throttledUpdateVisibleRoute]);
   
-  // 🆕 Enhanced Smooth map animation with animateToRegion
+  // Smooth map animation with animateToRegion
   const animateToLocation = useCallback(
     (targetLocation: LocationType, shouldIncludeUser: boolean = false) => {
       if (!mapRef.current || mapAnimationInProgress.current) return;
@@ -5955,7 +5605,6 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
       }
       
       setMapRegion(region);
-      // 🆕 Using animateToRegion for smooth map transitions
       mapRef.current.animateToRegion(region, 1000);
      
       setTimeout(() => {
@@ -5965,7 +5614,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
     [userLocation, location]
   );
   
-  // Start navigation (called after OTP verification) - FIXED
+  // Start navigation (called after OTP verification)
   const startNavigation = useCallback(async () => {
     if (!ride?.pickup || !ride?.drop) return;
     
@@ -5985,7 +5634,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
         setFullRouteCoords(routeCoords);
         setVisibleRouteCoords(routeCoords);
       
-        // ---- periodic route trimming (every 2 s) ----
+        // periodic route trimming (every 2 s)
         if (navigationInterval.current) clearInterval(navigationInterval.current);
         navigationInterval.current = setInterval(() => {
           throttledUpdateVisibleRoute();
@@ -6103,7 +5752,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
             setDisplayedUserLocation(initialUserLocation);
            
             if (location) {
-              // 🆕 Generate dynamic route from driver to pickup (GREEN ROUTE)
+              // Generate dynamic route from driver to pickup (GREEN ROUTE)
               try {
                 const pickupRoute = await fetchRoute(location, initialUserLocation);
                 if (pickupRoute) {
@@ -6127,6 +5776,15 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
             setTimeout(() => {
               socket.emit("getUserDataForDriver", { rideId: currentRideId });
             }, 1000);
+          } else {
+            // Ride already taken by another driver
+            if (response && response.message && response.message.includes("already accepted")) {
+              Alert.alert("Ride Taken", "This ride has already been accepted by another driver.");
+              clearMapData();
+              setRide(null);
+              setRideStatus("idle");
+              setDriverStatus("online");
+            }
           }
         }
       );
@@ -6138,7 +5796,6 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
     const currentRideId = rideId || ride?.rideId;
     if (!currentRideId) return;
    
-    // 🆕 Clean map data
     clearMapData();
    
     setRide(null);
@@ -6158,7 +5815,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
     Alert.alert("Ride Rejected ❌", "You rejected the ride");
   };
   
-  // 🆕 Clear all map data (markers, routes, polylines)
+  // Clear all map data (markers, routes, polylines)
   const clearMapData = useCallback(() => {
     console.log("🧹 Clearing all map data");
     setFullRouteCoords([]);
@@ -6173,7 +5830,6 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
    
     // Reset map region to driver's current location
     if (location && mapRef.current) {
-      // 🆕 Using animateToRegion for smooth return to driver location
       mapRef.current.animateToRegion({
         latitude: location.latitude,
         longitude: location.longitude,
@@ -6204,7 +5860,6 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
       console.log("✅ OTP Verified - Starting navigation from pickup to drop");
      
       if (ride.pickup && ride.drop) {
-        // 🆕 Start navigation with dynamic route from current location to drop (RED ROUTE)
         await startNavigation();
         animateToLocation(ride.drop, true);
       }
@@ -6291,13 +5946,12 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
     }
   };
   
-  // 🆕 Handle bill modal close with map cleanup
+  // Handle bill modal close with map cleanup
   const handleBillModalClose = () => {
     setShowBillModal(false);
     setRideStatus("completed");
     setDriverStatus("online");
    
-    // 🆕 Clean all map data after ride completion
     clearMapData();
    
     // Reset all ride states
@@ -6311,56 +5965,6 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
   // Handle verification modal close
   const handleVerificationModalClose = () => {
     setShowVerificationModal(false);
-  };
-  
-  // Handle ride requests
-  const handleRideRequest = (data: any) => {
-    if (!isMounted.current || !data?.rideId || !isDriverOnline) return;
-   
-    try {
-      const rideData: RideType = {
-        rideId: data.rideId,
-        RAID_ID: data.RAID_ID || "N/A",
-        otp: data.otp || "0000",
-        pickup: {
-          latitude: data.pickup?.lat || data.pickup?.latitude || 0,
-          longitude: data.pickup?.lng || data.pickup?.longitude || 0,
-          address: data.pickup?.address || "Unknown location",
-        },
-        drop: {
-          latitude: data.drop?.lat || data.drop?.latitude || 0,
-          longitude: data.drop?.lng || data.drop?.longitude || 0,
-          address: data.drop?.address || "Unknown location",
-        },
-        fare: data.fare || 0,
-        distance: data.distance || "0 km",
-        userName: data.userName || "Customer",
-        userMobile: data.userMobile || "N/A",
-      };
-     
-      setRide(rideData);
-      setRideStatus("onTheWay");
-     
-      Alert.alert(
-        "🚖 New Ride Request!",
-        `📍 Pickup: ${rideData.pickup.address}\n🎯 Drop: ${rideData.drop.address}\n💰 Fare: ₹${rideData.fare}\n📏 Distance: ${rideData.distance}\n👤 Customer: ${rideData.userName}`,
-        [
-          {
-            text: "❌ Reject",
-            onPress: () => rejectRide(rideData.rideId),
-            style: "destructive",
-          },
-          {
-            text: "✅ Accept",
-            onPress: () => acceptRide(rideData.rideId),
-          },
-        ],
-        { cancelable: false }
-      );
-    } catch (error) {
-      console.error("❌ Error processing ride request:", error);
-      Alert.alert("Error", "Could not process ride request. Please try again.");
-    }
   };
   
   // Socket event listeners
@@ -6444,7 +6048,6 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
           longitude: data.lng,
         };
        
-        // 🆕 Animate user marker smoothly
         animateUserMarker(newUserLocation.latitude, newUserLocation.longitude);
        
         setUserLocation((prev) => {
@@ -6476,7 +6079,6 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
           longitude: data.userCurrentLocation.longitude,
         };
        
-        // 🆕 Animate user marker smoothly
         animateUserMarker(userLiveLocation.latitude, userLiveLocation.longitude);
        
         setUserLocation(userLiveLocation);
@@ -6526,7 +6128,6 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
           userId: userData?.userId,
         });
        
-        // 🆕 Clean map after cancellation
         clearMapData();
        
         setRide(null);
@@ -6542,7 +6143,6 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
       if (!isMounted.current) return;
      
       if (ride && ride.rideId === data.rideId) {
-        // 🆕 Clean map
         clearMapData();
        
         setRide(null);
@@ -6586,7 +6186,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
     socket.on("rideAlreadyAccepted", handleRideAlreadyAccepted);
     socket.on("rideStarted", handleRideStarted);
    
-    // 🆕 Socket connection based on online status
+    // Socket connection based on online status
     if (isDriverOnline && !socket.connected) {
       socket.connect();
     } else if (!isDriverOnline && socket.connected) {
@@ -6607,15 +6207,12 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
     };
   }, [location, driverId, driverName, ride, rideStatus, userData, stopNavigation, currentSpeed, isDriverOnline, clearMapData, animateUserMarker]);
   
-  // ──────────────────────────────────────────────────────────────────────
-  //  LOCATION TRACKING – new unified effect (replaces old one)
-  // ──────────────────────────────────────────────────────────────────────
+  // Location tracking effect
   useEffect(() => {
     let watchId: number | null = null;
-
     const requestLocation = async () => {
       try {
-        // Android permission (iOS is handled by Info.plist)
+        // Android permission
         if (Platform.OS === "android" && !location) {
           const granted = await PermissionsAndroid.request(
             PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
@@ -6632,39 +6229,30 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
             return;
           }
         }
-
-        if (!location) return;               // safety – should never happen
+        if (!location) return;
         watchId = Geolocation.watchPosition(
           (pos) => {
             if (!isMounted.current || !isDriverOnline) return;
-
             const loc: LocationType = {
               latitude: pos.coords.latitude,
               longitude: pos.coords.longitude,
             };
-
             setLocation(loc);
             setCurrentSpeed(pos.coords.speed || 0);
             lastLocationUpdate.current = loc;
-
-            // 🆕 Animate driver marker smoothly
             animateDriverMarker(loc.latitude, loc.longitude, pos.coords.heading || 0);
-
-            // ---- distance calculation (same as before) ----
+            // distance calculation
             if (lastCoord && (rideStatus === "accepted" || rideStatus === "started")) {
               const dist = haversine(lastCoord, loc);
               const distanceKm = dist / 1000;
               setTravelledKm((prev) => prev + distanceKm);
-
               if (rideStatus === "started" && lastLocationBeforeOtp.current) {
                 distanceSinceOtp.current += distanceKm;
               }
             }
             setLastCoord(loc);
-
-            // ---- map auto-center (only when idle) ----
+            // map auto-center (only when idle)
             if (locationUpdateCount.current % 10 === 0 && mapRef.current && !ride) {
-              // 🆕 Using animateToRegion for smooth auto-centering
               mapRef.current.animateToRegion(
                 {
                   latitude: loc.latitude,
@@ -6675,8 +6263,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
                 500
               );
             }
-
-            // ---- DB + socket update (unchanged) ----
+            // DB + socket update
             saveLocationToDatabase(loc).catch(console.error);
           },
           (err) => {
@@ -6684,7 +6271,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
           },
           {
             enableHighAccuracy: true,
-            distanceFilter: 5,          // tighter filter (friend's code uses 10)
+            distanceFilter: 5,
             interval: 3000,
             fastestInterval: 2000,
           }
@@ -6693,10 +6280,8 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
         console.error("Location setup error:", e);
       }
     };
-
-    // start only when driver is online (your toggle controls isDriverOnline)
+    // start only when driver is online
     if (isDriverOnline) requestLocation();
-
     return () => {
       if (watchId !== null) Geolocation.clearWatch(watchId);
     };
@@ -6754,6 +6339,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
     <View style={styles.container}>
       <MapView
         ref={mapRef}
+        provider={PROVIDER_GOOGLE}
         style={styles.map}
         initialRegion={{
           latitude: location.latitude,
@@ -6761,8 +6347,8 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
           latitudeDelta: 0.01,
           longitudeDelta: 0.01,
         }}
-        showsUserLocation={false} // 🆕 Disabled default user location to use custom markers
-        showsMyLocationButton={false} // 🆕 Disabled default location button
+        showsUserLocation={false}
+        showsMyLocationButton={false}
         showsCompass={true}
         showsScale={true}
         zoomControlEnabled={true}
@@ -6771,7 +6357,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
         zoomEnabled={true}
         region={mapRegion}
       >
-        {/* 🆕 Custom Driver Marker with smooth animation */}
+        {/* Custom Driver Marker - Google Blue Dot */}
         {displayedDriverLocation && (
           <Marker
             ref={driverMarkerRef}
@@ -6786,7 +6372,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
           </Marker>
         )}
         
-        {/* 🆕 Pickup Marker - Only show when ride is active and not completed */}
+        {/* Pickup Marker */}
         {ride && rideStatus !== "completed" && ride.pickup && (
           <Marker
             coordinate={ride.pickup}
@@ -6796,7 +6382,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
           />
         )}
        
-        {/* 🆕 Drop Marker - Only show when ride is active and not completed */}
+        {/* Drop Marker */}
         {ride && rideStatus !== "completed" && ride.drop && (
           <Marker
             coordinate={ride.drop}
@@ -6806,7 +6392,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
           />
         )}
       
-        {/* 🆕 RED ROUTE - Dynamic polyline after OTP (pickup to drop) */}
+        {/* RED ROUTE - Dynamic polyline after OTP (pickup to drop) */}
         {rideStatus === "started" && visibleRouteCoords.length > 0 && (
           <Polyline
             coordinates={visibleRouteCoords}
@@ -6818,8 +6404,8 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
           />
         )}
       
-        {/* 🆕 GREEN ROUTE - Dynamic polyline before OTP (driver to pickup) */}
-        {rideStatus === "accepted" && ride?.routeCoords?.length && (
+        {/* GREEN ROUTE - Dynamic polyline before OTP (driver to pickup) */}
+        {rideStatus === "accepted" && ride?.routeCoords && ride.routeCoords.length > 0 && (
           <Polyline
             coordinates={ride.routeCoords}
             strokeWidth={5}
@@ -6830,7 +6416,7 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
           />
         )}
       
-        {/* 🆕 Custom User Marker with smooth animation */}
+        {/* Custom User Marker - Black Dot */}
         {ride && (rideStatus === "accepted" || rideStatus === "started") && displayedUserLocation && (
           <Marker
             ref={userMarkerRef}
@@ -6845,74 +6431,8 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
           </Marker>
         )}
       </MapView>
-      
 
-{isDriverOnline && (
-  <View style={styles.testButtonsContainer}>
-    <TouchableOpacity
-      style={styles.testButton}
-      onPress={async () => {
-        try {
-          await NotificationService.testNotification();
-          console.log('🔊 Sound test triggered');
-        } catch (error) {
-          console.error('❌ Sound test failed:', error);
-        }
-      }}
-    >
-      <Text style={styles.testButtonText}>🔊 Test Sound</Text>
-    </TouchableOpacity>
-    
-    <TouchableOpacity
-      style={[styles.testButton, { backgroundColor: '#2196F3' }]}
-      onPress={async () => {
-        try {
-          console.log('🔄 Manually registering FCM token...');
-          const token = await NotificationService.getFCMToken();
-          if (token) {
-            const registered = await sendFCMTokenToServer(token);
-            Alert.alert(
-              registered ? '✅ Success' : '❌ Failed',
-              registered ? 'FCM token registered!' : 'Failed to register FCM token'
-            );
-          } else {
-            Alert.alert('❌ Error', 'No FCM token available');
-          }
-        } catch (error) {
-          console.error('❌ Manual FCM registration failed:', error);
-          Alert.alert('❌ Error', 'FCM registration failed');
-        }
-      }}
-    >
-      <Text style={styles.testButtonText}>🔑 Register FCM Token</Text>
-    </TouchableOpacity>
-
-    <TouchableOpacity
-      style={[styles.testButton, { backgroundColor: '#FF9800' }]}
-      onPress={async () => {
-        try {
-          console.log('🧪 Creating test driver...');
-          const response = await fetch(`${API_BASE}/api/test/create-test-driver`, {
-            method: 'POST',
-          });
-          const result = await response.json();
-          Alert.alert(
-            result.success ? '✅ Success' : '❌ Failed',
-            result.message || 'Unknown error'
-          );
-        } catch (error) {
-          console.error('❌ Test driver creation failed:', error);
-          Alert.alert('❌ Error', 'Failed to create test driver');
-        }
-      }}
-    >
-      <Text style={styles.testButtonText}>👤 Create Test Driver</Text>
-    </TouchableOpacity>
-  </View>
-)}
-
-
-      {/* 🆕 Online/Offline Toggle Button */}
+      {/* Online/Offline Toggle Button */}
       {!ride && (
         <View style={styles.onlineToggleContainer}>
           <TouchableOpacity
@@ -7217,44 +6737,6 @@ const updateDriverOnlineStatus = async (isOnline: boolean) => {
 export default DriverScreen;
 
 const styles = StyleSheet.create({
-
-    testButtonsContainer: {
-    position: 'absolute',
-    top: 180,
-    right: 16,
-    left: 16,
-  },
-  testButton: {
-    backgroundColor: '#FF6B35',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-    elevation: 3,
-    alignItems: 'center',
-  },
-  testButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-
-
-
-  soundTestButton: {
-  position: 'absolute',
-  top: 180,
-  right: 16,
-  backgroundColor: '#FF6B35',
-  padding: 12,
-  borderRadius: 8,
-  elevation: 3,
-},
-soundTestButtonText: {
-  color: '#FFFFFF',
-  fontWeight: '600',
-  fontSize: 12,
-},
-
   container: {
     flex: 1,
     backgroundColor: "#f8f9fa",
@@ -7275,7 +6757,7 @@ soundTestButtonText: {
     color: "#666",
     textAlign: "center",
   },
-  // 🆕 Driver Marker Styles - Google Maps blue dot
+  // Driver Marker Styles - Google Maps blue dot
   driverMarker: {
     justifyContent: "center",
     alignItems: "center",
@@ -7292,7 +6774,7 @@ soundTestButtonText: {
     shadowOpacity: 0.3,
     shadowRadius: 3,
   },
-  // 🆕 Online/Offline Toggle Styles
+  // Online/Offline Toggle Styles
   onlineToggleContainer: {
     position: "absolute",
     top: Platform.OS === "ios" ? 120 : 110,
@@ -7658,6 +7140,2895 @@ soundTestButtonText: {
     color: "#FFFFFF",
   },
 });
+
+
+
+
+
+
+
+// import React, { useState, useEffect, useRef, useCallback } from "react";
+// import {
+//   View,
+//   Text,
+//   TouchableOpacity,
+//   StyleSheet,
+//   ActivityIndicator,
+//   PermissionsAndroid,
+//   Platform,
+//   Alert,
+//   Modal,
+//   TextInput,
+//   Dimensions,
+//   AppState,
+//   Linking,
+// } from "react-native";
+// import MapView, { Marker, Polyline } from "react-native-maps";
+// import Geolocation from "@react-native-community/geolocation";
+// import AsyncStorage from "@react-native-async-storage/async-storage";
+// import { API_BASE } from "./apiConfig";
+// import api from "../utils/api";
+// import MaterialIcons from "react-native-vector-icons/MaterialIcons";
+// import FontAwesome from "react-native-vector-icons/FontAwesome";
+// import BackgroundTimer from 'react-native-background-timer';
+// // Import the NotificationService
+// import NotificationService from './Notifications';
+// import messaging from '@react-native-firebase/messaging';
+
+// const { width, height } = Dimensions.get("window");
+
+// type LocationType = { latitude: number; longitude: number };
+// type RideType = {
+//   rideId: string;
+//   RAID_ID?: string;
+//   otp?: string;
+//   pickup: LocationType & { address?: string };
+//   drop: LocationType & { address?: string };
+//   routeCoords?: LocationType[];
+//   fare?: number;
+//   distance?: string;
+//   userName?: string;
+//   userMobile?: string;
+// };
+// type UserDataType = {
+//   name: string;
+//   mobile: string;
+//   location: LocationType;
+//   userId?: string;
+// };
+
+// const DriverScreen = ({ route, navigation }: { route: any; navigation: any }) => {
+//   const [location, setLocation] = useState<LocationType | null>(
+//     route.params?.latitude && route.params?.longitude
+//       ? { latitude: route.params.latitude, longitude: route.params.longitude }
+//       : null
+//   );
+//   const [ride, setRide] = useState<RideType | null>(null);
+//   const [userData, setUserData] = useState<UserDataType | null>(null);
+//   const [userLocation, setUserLocation] = useState<LocationType | null>(null);
+//   const [travelledKm, setTravelledKm] = useState(0);
+//   const [lastCoord, setLastCoord] = useState<LocationType | null>(null);
+//   const [otpModalVisible, setOtpModalVisible] = useState(false);
+//   const [enteredOtp, setEnteredOtp] = useState("");
+//   const [rideStatus, setRideStatus] = useState<
+//     "idle" | "onTheWay" | "accepted" | "started" | "completed"
+//   >("idle");
+//   const [isRegistered, setIsRegistered] = useState(false);
+//   const [socketConnected, setSocketConnected] = useState(false);
+//   const [driverStatus, setDriverStatus] = useState<
+//     "offline" | "online" | "onRide"
+//   >("offline");
+//   const [isLoading, setIsLoading] = useState(false);
+//   const mapRef = useRef<MapView | null>(null);
+//   const [driverId, setDriverId] = useState<string>(route.params?.driverId || "");
+//   const [driverName, setDriverName] = useState<string>(
+//     route.params?.driverName || ""
+//   );
+//   const [error, setError] = useState<string | null>(null);
+ 
+//   // Route handling states
+//   const [fullRouteCoords, setFullRouteCoords] = useState<LocationType[]>([]);
+//   const [visibleRouteCoords, setVisibleRouteCoords] = useState<LocationType[]>([]);
+//   const [nearestPointIndex, setNearestPointIndex] = useState(0);
+//   const [mapRegion, setMapRegion] = useState<any>(null);
+ 
+//   // New states for verification and bill
+//   const [showVerificationModal, setShowVerificationModal] = useState(false);
+//   const [showBillModal, setShowBillModal] = useState(false);
+//   const [billDetails, setBillDetails] = useState({
+//     distance: '0 km',
+//     travelTime: '0 mins',
+//     charge: 0,
+//     userName: '',
+//     userMobile: ''
+//   });
+//   const [verificationDetails, setVerificationDetails] = useState({
+//     pickup: '',
+//     dropoff: '',
+//     time: '',
+//     speed: 0,
+//     distance: 0,
+//   });
+//   const [otpSharedTime, setOtpSharedTime] = useState<Date | null>(null);
+//   const [currentSpeed, setCurrentSpeed] = useState<number>(0);
+//   // 🆕 NEW: Online/Offline toggle state
+//   const [isDriverOnline, setIsDriverOnline] = useState(false);
+//   const [backgroundTrackingActive, setBackgroundTrackingActive] = useState(false);
+ 
+//   // 🆕 FCM Notification states
+//   const [hasNotificationPermission, setHasNotificationPermission] = useState(false);
+//   const [isBackgroundMode, setIsBackgroundMode] = useState(false);
+  
+//   // 🆕 Animation states
+//   const [displayedDriverLocation, setDisplayedDriverLocation] = useState<LocationType | null>(null);
+//   const [displayedUserLocation, setDisplayedUserLocation] = useState<LocationType | null>(null);
+  
+//   // Refs for optimization
+//   const isMounted = useRef(true);
+//   const locationUpdateCount = useRef(0);
+//   const mapAnimationInProgress = useRef(false);
+//   const navigationInterval = useRef<NodeJS.Timeout | null>(null);
+//   const lastLocationUpdate = useRef<LocationType | null>(null);
+//   const routeUpdateThrottle = useRef<NodeJS.Timeout | null>(null);
+//   const distanceSinceOtp = useRef(0);
+//   const lastLocationBeforeOtp = useRef<LocationType | null>(null);
+//   const appState = useRef(AppState.currentState);
+//   const geolocationWatchId = useRef<number | null>(null);
+//   const backgroundLocationInterval = useRef<NodeJS.Timeout | null>(null);
+//   const driverMarkerRef = useRef<any>(null);
+//   const userMarkerRef = useRef<any>(null);
+//   const isMountedRef = useRef(true);
+  
+//   // Socket import
+//   let socket: any = null;
+//   try {
+//     socket = require("./socket").default;
+//   } catch (error) {
+//     console.warn("⚠️ Socket not available:", error);
+//   }
+  
+//   // Haversine distance function
+//   const haversine = (start: LocationType, end: LocationType) => {
+//     const R = 6371; // Earth's radius in kilometers
+//     const dLat = (end.latitude - start.latitude) * Math.PI / 180;
+//     const dLon = (end.longitude - start.longitude) * Math.PI / 180;
+//     const a =
+//       Math.sin(dLat/2) * Math.sin(dLat/2) +
+//       Math.cos(start.latitude * Math.PI / 180) * Math.cos(end.latitude * Math.PI / 180) *
+//       Math.sin(dLon/2) * Math.sin(dLon/2);
+//     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+//     return R * c * 1000; // Distance in meters
+//   };
+  
+//   // 🆕 Smooth driver marker animation function
+//   const animateDriverMarker = useCallback((latitude: number, longitude: number, heading: number = 0) => {
+//     if (!driverMarkerRef.current || !isMountedRef.current) return;
+
+//     const newCoordinate = { latitude, longitude };
+
+//     // 1️⃣ Calculate driver movement distance
+//     const prev = displayedDriverLocation;
+//     let distanceMoved = 0;
+//     if (prev) {
+//       const R = 6371e3;
+//       const φ1 = prev.latitude * Math.PI / 180;
+//       const φ2 = latitude * Math.PI / 180;
+//       const Δφ = (latitude - prev.latitude) * Math.PI / 180;
+//       const Δλ = (longitude - prev.longitude) * Math.PI / 180;
+//       const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+//                 Math.cos(φ1) * Math.cos(φ2) *
+//                 Math.sin(Δλ/2) * Math.sin(Δλ/2);
+//       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+//       distanceMoved = R * c; // meters
+//     }
+
+//     // 2️⃣ If driver not moved -> skip animation
+//     if (distanceMoved < 1) return; 
+
+//     // 3️⃣ Animation duration dynamic based on speed - INCREASED DURATION
+//     let animationDuration = 6000; // Increased to 6 seconds default
+//     if (currentSpeed > 0) {
+//       if (currentSpeed < 10) animationDuration = 7000; // slow - smooth
+//       else if (currentSpeed < 30) animationDuration = 5000; // medium
+//       else animationDuration = 3000; // fast driver
+//     }
+
+//     // 4️⃣ Animate marker (Android)
+//     if (Platform.OS === 'android' && driverMarkerRef.current) {
+//       driverMarkerRef.current.animateMarkerToCoordinate(newCoordinate, animationDuration);
+//     } else {
+//       setDisplayedDriverLocation(newCoordinate);
+//     }
+
+//     if (heading !== 0) {
+//       console.log(`🧭 Marker heading: ${heading}°`);
+//     }
+
+//     // Update displayed location for next comparison
+//     setDisplayedDriverLocation(newCoordinate);
+//   }, [currentSpeed, displayedDriverLocation]);
+
+//   // 🆕 Smooth user marker animation function
+//   const animateUserMarker = useCallback((latitude: number, longitude: number) => {
+//     if (!userMarkerRef.current || !isMountedRef.current) return;
+
+//     const newCoordinate = { latitude, longitude };
+
+//     // Calculate user movement distance
+//     const prev = displayedUserLocation;
+//     let distanceMoved = 0;
+//     if (prev) {
+//       const R = 6371e3;
+//       const φ1 = prev.latitude * Math.PI / 180;
+//       const φ2 = latitude * Math.PI / 180;
+//       const Δφ = (latitude - prev.latitude) * Math.PI / 180;
+//       const Δλ = (longitude - prev.longitude) * Math.PI / 180;
+//       const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+//                 Math.cos(φ1) * Math.cos(φ2) *
+//                 Math.sin(Δλ/2) * Math.sin(Δλ/2);
+//       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+//       distanceMoved = R * c;
+//     }
+
+//     // Skip animation if minimal movement
+//     if (distanceMoved < 1) return;
+
+//     // Smooth animation for user marker
+//     const animationDuration = 3000; // 3 seconds for smooth user movement
+
+//     if (Platform.OS === 'android' && userMarkerRef.current) {
+//       userMarkerRef.current.animateMarkerToCoordinate(newCoordinate, animationDuration);
+//     } else {
+//       setDisplayedUserLocation(newCoordinate);
+//     }
+
+//     setDisplayedUserLocation(newCoordinate);
+//   }, [displayedUserLocation]);
+  
+//   // Cleanup on unmount
+//   useEffect(() => {
+//     isMountedRef.current = true;
+//     return () => {
+//       isMounted.current = false;
+//       isMountedRef.current = false;
+//       if (navigationInterval.current) {
+//         clearInterval(navigationInterval.current);
+//       }
+//       if (routeUpdateThrottle.current) {
+//         clearTimeout(routeUpdateThrottle.current);
+//       }
+//       if (geolocationWatchId.current) {
+//         Geolocation.clearWatch(geolocationWatchId.current);
+//       }
+//       if (backgroundLocationInterval.current) {
+//         clearInterval(backgroundLocationInterval.current);
+//       }
+//       // Clean up notification listeners
+//       NotificationService.off('rideRequest', handleNotificationRideRequest);
+//       NotificationService.off('tokenRefresh', () => {});
+//       // Clean up FCM token refresh listener
+//       const unsubscribeTokenRefresh = messaging().onTokenRefresh(async (newToken) => {
+//         console.log('🔄 FCM token refreshed:', newToken);
+//         if (driverId) {
+//           await sendFCMTokenToServer(newToken);
+//         }
+//       });
+//       unsubscribeTokenRefresh();
+//     };
+//   }, []);
+  
+//   // 🆕 Background location tracking with regular geolocation
+//   const startBackgroundLocationTracking = useCallback(() => {
+//     console.log("🔄 Starting background location tracking");
+   
+//     // Stop any existing tracking
+//     if (geolocationWatchId.current) {
+//       Geolocation.clearWatch(geolocationWatchId.current);
+//     }
+   
+//     // Start high-frequency tracking when online
+//     geolocationWatchId.current = Geolocation.watchPosition(
+//       (position) => {
+//         if (!isMounted.current || !isDriverOnline) return;
+       
+//         const newLocation = {
+//           latitude: position.coords.latitude,
+//           longitude: position.coords.longitude,
+//         };
+       
+//         console.log("📍 Location update:", newLocation);
+//         setLocation(newLocation);
+//         setCurrentSpeed(position.coords.speed || 0);
+       
+//         // 🆕 Animate driver marker smoothly
+//         animateDriverMarker(newLocation.latitude, newLocation.longitude, position.coords.heading || 0);
+       
+//         // Update distance if ride is active
+//         if (lastCoord && (rideStatus === "accepted" || rideStatus === "started")) {
+//           const dist = haversine(lastCoord, newLocation);
+//           const distanceKm = dist / 1000;
+//           setTravelledKm((prev) => prev + distanceKm);
+         
+//           if (rideStatus === "started" && lastLocationBeforeOtp.current) {
+//             distanceSinceOtp.current += distanceKm;
+//           }
+//         }
+       
+//         setLastCoord(newLocation);
+//         lastLocationUpdate.current = newLocation;
+       
+//         // Send to server and socket
+//         saveLocationToDatabase(newLocation);
+//       },
+//       (error) => {
+//         console.error("❌ Geolocation error:", error);
+//       },
+//       {
+//         enableHighAccuracy: true,
+//         distanceFilter: 5, // 5 meters
+//         interval: 3000, // 3 seconds
+//         fastestInterval: 2000, // 2 seconds
+//       }
+//     );
+   
+//     setBackgroundTrackingActive(true);
+//   }, [isDriverOnline, lastCoord, rideStatus, animateDriverMarker]);
+  
+//   // 🆕 Stop background location tracking
+//   const stopBackgroundLocationTracking = useCallback(() => {
+//     console.log("🛑 Stopping background location tracking");
+   
+//     if (geolocationWatchId.current) {
+//       Geolocation.clearWatch(geolocationWatchId.current);
+//       geolocationWatchId.current = null;
+//     }
+   
+//     if (backgroundLocationInterval.current) {
+//       clearInterval(backgroundLocationInterval.current);
+//       backgroundLocationInterval.current = null;
+//     }
+   
+//     setBackgroundTrackingActive(false);
+//   }, []);
+  
+//   // 🆕 Handle app state changes for background tracking
+//   useEffect(() => {
+//     const handleAppStateChange = (nextAppState: string) => {
+//       if (nextAppState === 'background' && isDriverOnline) {
+//         console.log("📱 App in background, maintaining location tracking");
+//         setIsBackgroundMode(true);
+//       } else if (nextAppState === 'active' && isDriverOnline) {
+//         console.log("📱 App in foreground");
+//         setIsBackgroundMode(false);
+//         // Check for pending notifications when app comes to foreground
+//         NotificationService.checkPendingNotifications();
+//       }
+//     };
+    
+//     const subscription = AppState.addEventListener('change', handleAppStateChange);
+//     return () => {
+//       subscription.remove();
+//     };
+//   }, [isDriverOnline]);
+  
+//   // 🆕 FCM: Initialize notification system
+//   useEffect(() => {
+//     const initializeNotificationSystem = async () => {
+//       try {
+//         console.log('🔔 Setting up complete notification system...');
+       
+//         // Initialize the notification service
+//         const initialized = await NotificationService.initializeNotifications();
+       
+//         if (initialized) {
+//           console.log('✅ Notification system initialized successfully');
+         
+//           // Get FCM token and send to server
+//           const token = await NotificationService.getFCMToken();
+//           if (token && driverId) {
+//             await sendFCMTokenToServer(token);
+//           }
+         
+//           // Listen for ride requests
+//           NotificationService.on('rideRequest', handleNotificationRideRequest);
+         
+//           // Listen for token refresh
+//           NotificationService.on('tokenRefresh', async (newToken) => {
+//             console.log('🔄 FCM token refreshed, updating server...');
+//             if (driverId) {
+//               await sendFCMTokenToServer(newToken);
+//             }
+//           });
+         
+//           setHasNotificationPermission(true);
+//         } else {
+//           console.log('❌ Notification system initialization failed');
+//           setHasNotificationPermission(false);
+//         }
+//       } catch (error) {
+//         console.error('❌ Error in notification system initialization:', error);
+//         // Don't block the app if notifications fail
+//         setHasNotificationPermission(false);
+//       }
+//     };
+    
+//     // Initialize when driver goes online
+//     if ((driverStatus === 'online' || driverStatus === 'onRide') && !hasNotificationPermission) {
+//       initializeNotificationSystem();
+//     }
+    
+//     return () => {
+//       // Cleanup
+//       NotificationService.off('rideRequest', handleNotificationRideRequest);
+//     };
+//   }, [driverStatus, driverId, hasNotificationPermission]);
+ 
+ 
+//   // In Screen1.tsx - Enhanced FCM token registration
+// const sendFCMTokenToServer = async (token: string): Promise<boolean> => {
+//   try {
+//     console.log('\n🔑 ===== FCM TOKEN REGISTRATION PROCESS =====');
+//     console.log('📱 Driver ID:', driverId);
+//     console.log('🔑 FCM Token:', token.substring(0, 20) + '...');
+//     console.log('📏 Token Length:', token.length);
+//     console.log('📱 Platform:', Platform.OS);
+
+//     const authToken = await AsyncStorage.getItem("authToken");
+//     if (!authToken) {
+//       console.log('❌ NO AUTH TOKEN AVAILABLE FOR FCM REGISTRATION');
+//       return false;
+//     }
+
+//     if (!driverId) {
+//       console.log('❌ NO DRIVER ID AVAILABLE FOR FCM REGISTRATION');
+//       return false;
+//     }
+
+//     const payload = {
+//       driverId: driverId,
+//       fcmToken: token,
+//       platform: Platform.OS,
+//       appVersion: '1.0.0'
+//     };
+
+//     console.log('📦 Sending FCM registration payload:', payload);
+
+//     const response = await fetch(`${API_BASE}/drivers/update-fcm-token`, {
+//       method: 'POST',
+//       headers: {
+//         'Content-Type': 'application/json',
+//         Authorization: `Bearer ${authToken}`,
+//       },
+//       body: JSON.stringify(payload),
+//     });
+
+//     const responseText = await response.text();
+//     console.log('📱 Server Response Status:', response.status);
+//     console.log('📱 Server Response Raw:', responseText);
+
+//     let responseData;
+//     try {
+//       responseData = JSON.parse(responseText);
+//     } catch (parseError) {
+//       console.error('❌ SERVER RETURNED NON-JSON RESPONSE:', responseText);
+//       return false;
+//     }
+
+//     console.log('📱 Server Response Parsed:', responseData);
+
+//     if (response.ok && responseData.success) {
+//       console.log('✅ FCM TOKEN REGISTERED ON SERVER SUCCESSFULLY');
+//       console.log('✅ Driver:', responseData.driverId);
+//       console.log('✅ Name:', responseData.name);
+//       console.log('✅ Token Updated:', responseData.tokenUpdated);
+//       console.log('================================================\n');
+//       return true;
+//     } else {
+//       console.log('❌ SERVER ERROR REGISTERING FCM TOKEN:', responseData.error || responseData.message);
+//       console.log('================================================\n');
+//       return false;
+//     }
+//   } catch (error) {
+//     console.error('❌ NETWORK ERROR REGISTERING FCM TOKEN:', error);
+//     console.log('================================================\n');
+//     return false;
+//   }
+// };
+
+
+
+
+// const forceRefreshFCMToken = async () => {
+//   try {
+//     console.log('\n🔄 ===== FORCE FCM TOKEN REFRESH PROCESS =====');
+//     console.log('📱 Driver ID:', driverId);
+//     console.log('🔐 Checking FCM permissions...');
+
+//     // Check and request permissions first
+//     const authStatus = await messaging().hasPermission();
+//     console.log('🔐 Current Permission Status:', authStatus);
+
+//     if (authStatus === messaging.AuthorizationStatus.NOT_DETERMINED) {
+//       console.log('🔐 Requesting notification permission...');
+//       const newStatus = await messaging().requestPermission();
+//       console.log('🔐 New Permission Status:', newStatus);
+//     }
+
+//     console.log('🗑️ Deleting old FCM token...');
+    
+//     // Delete current token
+//     try {
+//       await messaging().deleteToken();
+//       console.log('✅ Old FCM token deleted successfully');
+//     } catch (deleteError) {
+//       console.log('⚠️ Could not delete old token (might already be invalid):', deleteError);
+//     }
+
+//     console.log('🔑 Generating NEW FCM token...');
+    
+//     // Get new token with retry logic
+//     let newToken: string | null = null;
+//     let retryCount = 0;
+    
+//     while (!newToken && retryCount < 3) {
+//       try {
+//         newToken = await messaging().getToken();
+//         if (!newToken) {
+//           retryCount++;
+//           console.log(`🔄 Retry ${retryCount}/3: Waiting for token...`);
+//           await new Promise(resolve => setTimeout(resolve, 1000));
+//         }
+//       } catch (tokenError) {
+//         console.error(`❌ Token generation error (attempt ${retryCount + 1}):`, tokenError);
+//         retryCount++;
+//         await new Promise(resolve => setTimeout(resolve, 1000));
+//       }
+//     }
+
+//     if (newToken) {
+//       console.log('🎉 NEW FCM TOKEN GENERATED SUCCESSFULLY!');
+//       console.log('🔑 Token:', newToken);
+//       console.log('📏 Length:', newToken.length);
+//       console.log('🔍 Token Preview:', `${newToken.substring(0, 15)}...${newToken.slice(-10)}`);
+
+//       console.log('📤 Registering new token with server...');
+      
+//       // Register with server
+//       const registered = await sendFCMTokenToServer(newToken);
+      
+//       if (registered) {
+//         console.log('✅ NEW FCM TOKEN REGISTERED WITH SERVER!');
+        
+//         Alert.alert(
+//           '✅ SUCCESS!', 
+//           `New FCM token registered successfully!\n\nToken Preview: ${newToken.substring(0, 15)}...\nLength: ${newToken.length} characters\n\nTesting the token now...`
+//         );
+        
+//         // Test the new token immediately
+//         setTimeout(() => {
+//           testNewFCMToken(newToken!);
+//         }, 3000);
+//       } else {
+//         Alert.alert('❌ REGISTRATION FAILED', 'Failed to register new FCM token with server. Check server logs.');
+//       }
+//     } else {
+//       console.log('❌ FAILED TO GENERATE NEW FCM TOKEN AFTER 3 ATTEMPTS');
+//       Alert.alert(
+//         '❌ TOKEN GENERATION FAILED', 
+//         'Could not generate new FCM token. Please check:\n\n1. Internet connection\n2. Firebase configuration\n3. App permissions'
+//       );
+//     }
+    
+//     return newToken;
+//   } catch (error) {
+//     console.error('❌ CRITICAL ERROR IN FCM TOKEN REFRESH:', error);
+//     Alert.alert(
+//       '❌ CRITICAL ERROR', 
+//       `FCM Token refresh failed:\n\n${error.message}\n\nCheck Firebase configuration and app permissions.`
+//     );
+//     return null;
+//   }
+// };
+
+
+
+// // In your Screen1.tsx or Notifications.tsx
+// const registerFCMToken = async (driverId: string, fcmToken: string) => {
+//   try {
+//     const payload = {
+//       driverId,
+//       fcmToken,
+//       platform: Platform.OS,
+//       appVersion: '1.0.0'
+//     };
+
+//     const response = await fetch(`${API_BASE_URL}/register-fcm-token`, {
+//       method: 'POST',
+//       headers: {
+//         'Content-Type': 'application/json',
+//       },
+//       body: JSON.stringify(payload),
+//     });
+
+//     const data = await response.json();
+    
+//     if (!data.success) {
+//       if (data.error.includes('Driver is not defined') || data.error.includes('Driver not found')) {
+//         console.warn('Driver record issue, retrying in 5 seconds...');
+//         // Retry after 5 seconds
+//         setTimeout(() => registerFCMToken(driverId, fcmToken), 5000);
+//         return;
+//       }
+//       throw new Error(data.error);
+//     }
+    
+//     console.log('✅ FCM token registered successfully');
+//   } catch (error) {
+//     console.error('❌ FCM registration failed:', error);
+//     // Implement fallback logic or show user message
+//   }
+// };
+
+
+
+// // Add this helper function
+// const createTestDriver = async (fcmToken: string) => {
+//   try {
+//     console.log('🚀 Creating test driver...');
+    
+//     const response = await fetch(`${API_BASE}/api/test/create-test-driver`, {
+//       method: 'POST',
+//       headers: {
+//         'Content-Type': 'application/json',
+//       },
+//     });
+
+//     const result = await response.json();
+//     console.log('📱 Test driver creation result:', result);
+
+//     if (result.success) {
+//       console.log('✅ Test driver created, retrying FCM registration...');
+//       // Retry FCM registration
+//       await sendFCMTokenToServer(fcmToken);
+//     }
+//   } catch (error) {
+//     console.error('❌ Error creating test driver:', error);
+//   }
+// };
+
+// // Enhanced online status toggle
+// const toggleOnlineStatus = async () => {
+//   try {
+//     if (isDriverOnline) {
+//       // Going offline
+//       console.log('🔴 Going offline...');
+//       setIsDriverOnline(false);
+//       setDriverStatus("offline");
+//       stopBackgroundLocationTracking();
+      
+//       // Update server status
+//       await updateDriverOnlineStatus(false);
+//     } else {
+//       // Going online
+//       console.log('🟢 Going online...');
+//       setIsDriverOnline(true);
+//       setDriverStatus("online");
+      
+//       // Start location tracking
+//       startBackgroundLocationTracking();
+      
+//       // Register FCM token when going online
+//       const token = await NotificationService.getFCMToken();
+//       if (token) {
+//         console.log('📱 Registering FCM token for online driver...');
+//         const registered = await sendFCMTokenToServer(token);
+//         if (registered) {
+//           console.log('✅ FCM token registered successfully for online driver');
+//         } else {
+//           console.log('⚠️ FCM token registration failed, but continuing online');
+//         }
+//       }
+      
+//       // Update server status
+//       await updateDriverOnlineStatus(true);
+//     }
+//   } catch (error) {
+//     console.error('❌ Error toggling online status:', error);
+//   }
+// };
+  
+
+
+
+// // Auto-register FCM token on app start
+// useEffect(() => {
+//   const initializeFCMOnStart = async () => {
+//     try {
+//       console.log('🚀 Initializing FCM on app start...');
+      
+//       // Get FCM token
+//       const token = await NotificationService.getFCMToken();
+//       if (token && driverId) {
+//         console.log('📱 Auto-registering FCM token on app start...');
+//         const registered = await sendFCMTokenToServer(token);
+//         if (registered) {
+//           console.log('✅ FCM token auto-registered on app start');
+//         }
+//       }
+//     } catch (error) {
+//       console.error('❌ Error auto-registering FCM token:', error);
+//     }
+//   };
+
+//   // Initialize when driver info is loaded
+//   if (driverId) {
+//     initializeFCMOnStart();
+//   }
+// }, [driverId]);
+
+  
+// // In Screen1.tsx - Enhanced notification handler
+// const handleNotificationRideRequest = useCallback((data: any) => {
+//   console.log('\n📱 ===== 🚖 NEW RIDE REQUEST RECEIVED IN DRIVER APP ===== 🚖');
+//   console.log('📦 Raw notification data:', JSON.stringify(data, null, 2));
+  
+//   if (!data || data.type !== 'ride_request') {
+//     console.error('❌ INVALID RIDE REQUEST PAYLOAD:', data);
+//     return;
+//   }
+
+//   // Ensure all required fields exist with fallbacks
+//   const rideData: RideType = {
+//     rideId: data.rideId || `RIDE_${Date.now()}`,
+//     RAID_ID: data.RAID_ID || "N/A",
+//     otp: data.otp || "0000",
+//     pickup: {
+//       latitude: data.pickup?.lat || data.pickup?.latitude || (location?.latitude || 0),
+//       longitude: data.pickup?.lng || data.pickup?.longitude || (location?.longitude || 0),
+//       address: data.pickup?.address || "Unknown pickup location",
+//     },
+//     drop: {
+//       latitude: data.drop?.lat || data.drop?.latitude || (location?.latitude || 0),
+//       longitude: data.drop?.lng || data.drop?.longitude || (location?.longitude || 0),
+//       address: data.drop?.address || "Unknown drop location",
+//     },
+//     fare: data.fare || 0,
+//     distance: data.distance || "0 km",
+//     userName: data.userName || data.customerName || "Customer",
+//     userMobile: data.userMobile || "N/A",
+//   };
+
+//   console.log('✅ PROCESSED RIDE DATA:');
+//   console.log('   🆔 Ride ID:', rideData.rideId);
+//   console.log('   🆔 RAID ID:', rideData.RAID_ID);
+//   console.log('   👤 Customer:', rideData.userName);
+//   console.log('   📞 Mobile:', rideData.userMobile);
+//   console.log('   📍 Pickup:', rideData.pickup.address);
+//   console.log('   🎯 Drop:', rideData.drop.address);
+//   console.log('   💰 Fare:', rideData.fare);
+//   console.log('   📏 Distance:', rideData.distance);
+//   console.log('   🔢 OTP:', rideData.otp);
+//   console.log('   📍 Pickup Coords:', `${rideData.pickup.latitude}, ${rideData.pickup.longitude}`);
+//   console.log('   🎯 Drop Coords:', `${rideData.drop.latitude}, ${rideData.drop.longitude}`);
+
+//   console.log('🎯 SHOWING RIDE REQUEST ALERT TO DRIVER...');
+  
+//   // Show the ride request alert
+//   Alert.alert(
+//     "🚖 New Ride Request!",
+//     `👤 Customer: ${rideData.userName}\n📞 Mobile: ${rideData.userMobile}\n📍 Pickup: ${rideData.pickup.address}\n🎯 Drop: ${rideData.drop.address}\n💰 Fare: ₹${rideData.fare}\n📏 Distance: ${rideData.distance}\n🔢 OTP: ${rideData.otp}`,
+//     [
+//       {
+//         text: "❌ Reject",
+//         onPress: () => {
+//           console.log('❌ DRIVER REJECTED THE RIDE:', rideData.rideId);
+//           rejectRide(rideData.rideId);
+//         },
+//         style: "destructive",
+//       },
+//       {
+//         text: "✅ Accept",
+//         onPress: () => {
+//           console.log('✅ DRIVER ACCEPTED THE RIDE:', rideData.rideId);
+//           acceptRide(rideData.rideId);
+//         },
+//       },
+//     ],
+//     { cancelable: false }
+//   );
+
+//   console.log('✅ RIDE REQUEST PROCESSING COMPLETED IN DRIVER APP');
+//   console.log('================================================\n');
+// }, [location]);
+
+
+// const updateDriverOnlineStatus = async (isOnline: boolean) => {
+//   try {
+//     const response = await fetch(`${API_BASE}/api/drivers/online-status`, {
+//       method: 'POST',
+//       headers: {
+//         'Content-Type': 'application/json',
+//         Authorization: `Bearer ${await AsyncStorage.getItem('authToken')}`,
+//       },
+//       body: JSON.stringify({
+//         driverId,
+//         isOnline,
+//         location: location || { latitude: 0, longitude: 0 }
+//       }),
+//     });
+    
+//     console.log(`📡 Online status update: ${isOnline ? 'ONLINE' : 'OFFLINE'} - ${response.status}`);
+//   } catch (error) {
+//     console.error('❌ Error updating online status:', error);
+//   }
+// };
+
+
+//   // Load driver info and verify token on mount
+//   useEffect(() => {
+//     const loadDriverInfo = async () => {
+//       try {
+//         console.log("🔍 Loading driver info from AsyncStorage...");
+//         const storedDriverId = await AsyncStorage.getItem("driverId");
+//         const storedDriverName = await AsyncStorage.getItem("driverName");
+//         const token = await AsyncStorage.getItem("authToken");
+//         const savedOnlineStatus = await AsyncStorage.getItem("driverOnlineStatus");
+       
+//         if (storedDriverId && storedDriverName && token) {
+//           setDriverId(storedDriverId);
+//           setDriverName(storedDriverName);
+//           console.log("✅ Token found, skipping verification");
+         
+//           // Restore online status if it was online before
+//           if (savedOnlineStatus === "online") {
+//             setIsDriverOnline(true);
+//             setDriverStatus("online");
+//             // Start tracking (socket connect triggered by useEffect on isDriverOnline)
+//             startBackgroundLocationTracking();
+//           }
+        
+//           if (!location) {
+//             try {
+//               const pos = await new Promise<Geolocation.GeoPosition>((resolve, reject) => {
+//                 Geolocation.getCurrentPosition(resolve, reject, {
+//                   enableHighAccuracy: true,
+//                   timeout: 15000,
+//                   maximumAge: 0
+//                 });
+//               });
+            
+//               const currentLoc = {
+//                 latitude: pos.coords.latitude,
+//                 longitude: pos.coords.longitude,
+//               };
+//               setLocation(currentLoc);
+//               setDisplayedDriverLocation(currentLoc);
+//               setLastCoord(currentLoc);
+//             } catch (locationError) {
+//               console.error("❌ Error getting location:", locationError);
+//             }
+//           }
+//         } else {
+//           console.log("❌ No driver info or token found, navigating to LoginScreen");
+//           await AsyncStorage.clear();
+//           navigation.replace("LoginScreen");
+//         }
+//       } catch (error) {
+//         console.error("❌ Error loading driver info:", error);
+//         await AsyncStorage.clear();
+//         navigation.replace("LoginScreen");
+//       }
+//     };
+   
+//     if (!driverId || !driverName) {
+//       loadDriverInfo();
+//     }
+//   }, [driverId, driverName, navigation, location]);
+  
+//   // Request user location when ride is accepted
+//   useEffect(() => {
+//     if (rideStatus === "accepted" && ride?.rideId && socket) {
+//       console.log("📍 Requesting initial user location for accepted ride");
+//       socket.emit("getUserDataForDriver", { rideId: ride.rideId });
+      
+//       const intervalId = setInterval(() => {
+//         if (rideStatus === "accepted" || rideStatus === "started") {
+//           socket.emit("getUserDataForDriver", { rideId: ride.rideId });
+//         }
+//       }, 10000);
+      
+//       return () => clearInterval(intervalId);
+//     }
+//   }, [rideStatus, ride?.rideId]);
+  
+//   // Optimized location saving
+//   const saveLocationToDatabase = useCallback(
+//     async (location: LocationType) => {
+//       try {
+//         locationUpdateCount.current++;
+//         if (locationUpdateCount.current % 3 !== 0) { // Send every 3rd update
+//           return;
+//         }
+       
+//         const payload = {
+//           driverId,
+//           driverName: driverName || "Unknown Driver",
+//           latitude: location.latitude,
+//           longitude: location.longitude,
+//           vehicleType: "taxi",
+//           status: driverStatus === "onRide" ? "onRide" : isDriverOnline ? "Live" : "offline",
+//           rideId: driverStatus === "onRide" ? ride?.rideId : null,
+//           timestamp: new Date().toISOString(),
+//         };
+        
+//         const response = await fetch(`${API_BASE}/driver-location/update`, {
+//           method: "POST",
+//           headers: {
+//             "Content-Type": "application/json",
+//             Authorization: `Bearer ${await AsyncStorage.getItem("authToken")}`,
+//           },
+//           body: JSON.stringify(payload),
+//         });
+       
+//         if (!response.ok) {
+//           const errorText = await response.text();
+//           console.error("❌ Failed to save location:", errorText);
+//           return;
+//         }
+        
+//         if (socket && socket.connected && isDriverOnline) {
+//           // 🆕 Emit as per requirement (updated to match friend's code)
+//           socket.emit('driverLocationUpdate', {
+//             driverId,
+//             latitude: location.latitude,
+//             longitude: location.longitude,
+//             status: driverStatus === "onRide" ? "onRide" : 'Live',
+//             rideId: driverStatus === "onRide" ? ride?.rideId : null,
+//           });
+//         }
+//       } catch (error) {
+//         console.error("❌ Error saving location to DB:", error);
+//       }
+//     },
+//     [driverId, driverName, driverStatus, ride?.rideId, isDriverOnline]
+//   );
+  
+//   // Register driver with socket
+//   useEffect(() => {
+//     if (!isRegistered && driverId && location && isDriverOnline && socket) {
+//       console.log("📝 Registering driver with socket:", driverId);
+//       socket.emit("registerDriver", {
+//         driverId,
+//         driverName,
+//         latitude: location.latitude,
+//         longitude: location.longitude,
+//         vehicleType: "taxi",
+//       });
+//       setIsRegistered(true);
+//     }
+//   }, [driverId, location, isRegistered, driverName, isDriverOnline]);
+  
+//   // 🆕 Route fetching with real-time updates - IMPROVED
+//   const fetchRoute = useCallback(
+//     async (origin: LocationType, destination: LocationType) => {
+//       try {
+//         console.log("🗺️ Fetching route between:", {
+//           origin: { lat: origin.latitude, lng: origin.longitude },
+//           destination: { lat: destination.latitude, lng: destination.longitude },
+//         });
+       
+//         // Use Google Maps Directions API for accurate routing
+//         const apiKey = "AIzaSyA9Ef953b2mO_rr940k-3OclHSZp3ldM2o"; // Using provided API key
+//         const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}&key=${apiKey}&mode=driving`;
+        
+//         const response = await fetch(url);
+//         const data = await response.json();
+        
+//         if (data.routes && data.routes.length > 0) {
+//           const route = data.routes[0];
+//           const coords: LocationType[] = [];
+          
+//           // Decode the polyline
+//           if (route.overview_polyline && route.overview_polyline.points) {
+//             const decodedPoints = decodePolyline(route.overview_polyline.points);
+//             decodedPoints.forEach(point => {
+//               coords.push({
+//                 latitude: point.lat,
+//                 longitude: point.lng
+//               });
+//             });
+//           }
+          
+//           console.log("✅ Route fetched, coordinates count:", coords.length);
+//           return coords;
+//         } else {
+//           console.error("❌ No routes found in response");
+//           // Fallback to OSRM if Google fails
+//           return fetchOSRMRoute(origin, destination);
+//         }
+//       } catch (error) {
+//         console.error("❌ Error fetching route with Google:", error);
+//         // Fallback to OSRM
+//         return fetchOSRMRoute(origin, destination);
+//       }
+//     },
+//     []
+//   );
+  
+//   // Fallback to OSRM routing
+//   const fetchOSRMRoute = useCallback(
+//     async (origin: LocationType, destination: LocationType) => {
+//       try {
+//         console.log("🗺️ Using OSRM fallback for route between:", {
+//           origin: { lat: origin.latitude, lng: origin.longitude },
+//           destination: { lat: destination.latitude, lng: destination.longitude },
+//         });
+        
+//         const url = `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`;
+//         const response = await fetch(url);
+//         const data = await response.json();
+        
+//         if (data.routes && data.routes.length > 0) {
+//           const coords = data.routes[0].geometry.coordinates.map(
+//             ([lng, lat]: number[]) => ({
+//               latitude: lat,
+//               longitude: lng,
+//             })
+//           );
+//           console.log("✅ OSRM route fetched, coordinates count:", coords.length);
+//           return coords;
+//         } else {
+//           console.error("❌ No OSRM routes found");
+//           // Return a straight line route as last resort
+//           return [origin, destination];
+//         }
+//       } catch (error) {
+//         console.error("❌ Error fetching OSRM route:", error);
+//         // Return a straight line route as fallback
+//         return [origin, destination];
+//       }
+//     },
+//     []
+//   );
+  
+//   // Helper function to decode Google's polyline
+//   const decodePolyline = (encoded: string) => {
+//     const points: { lat: number; lng: number }[] = [];
+//     let index = 0;
+//     const len = encoded.length;
+//     let lat = 0;
+//     let lng = 0;
+    
+//     while (index < len) {
+//       let b;
+//       let shift = 0;
+//       let result = 0;
+      
+//       do {
+//         b = encoded.charCodeAt(index++) - 63;
+//         result |= (b & 0x1f) << shift;
+//         shift += 5;
+//       } while (b >= 0x20);
+      
+//       const dlat = ((result & 1) !== 0 ? ~(result >> 1) : (result >> 1));
+//       lat += dlat;
+      
+//       shift = 0;
+//       result = 0;
+      
+//       do {
+//         b = encoded.charCodeAt(index++) - 63;
+//         result |= (b & 0x1f) << shift;
+//         shift += 5;
+//       } while (b >= 0x20);
+      
+//       const dlng = ((result & 1) !== 0 ? ~(result >> 1) : (result >> 1));
+//       lng += dlng;
+      
+//       points.push({
+//         lat: lat * 1e-5,
+//         lng: lng * 1e-5
+//       });
+//     }
+    
+//     return points;
+//   };
+  
+//   // Find nearest point on route
+//   const findNearestPointOnRoute = useCallback(
+//     (currentLocation: LocationType, routeCoords: LocationType[]) => {
+//       if (!routeCoords || routeCoords.length === 0) return null;
+     
+//       let minDistance = Infinity;
+//       let nearestIndex = 0;
+     
+//       for (let i = 0; i < routeCoords.length; i++) {
+//         const distance = haversine(currentLocation, routeCoords[i]);
+//         if (distance < minDistance) {
+//           minDistance = distance;
+//           nearestIndex = i;
+//         }
+//       }
+     
+//       return { index: nearestIndex, distance: minDistance };
+//     },
+//     []
+//   );
+  
+//   // 🆕 Update visible route as driver moves (Dynamic Polyline)
+//   const updateVisibleRoute = useCallback(() => {
+//     if (!location || !fullRouteCoords.length) return;
+   
+//     const nearestPoint = findNearestPointOnRoute(location, fullRouteCoords);
+//     if (!nearestPoint) return;
+   
+//     // Always update the visible route when driver moves
+//     const remainingRoute = fullRouteCoords.slice(nearestPoint.index);
+  
+//     if (remainingRoute.length > 0) {
+//       // Add current location to make the route more accurate
+//       const updatedRoute = [location, ...remainingRoute];
+//       setVisibleRouteCoords(updatedRoute);
+//       setNearestPointIndex(nearestPoint.index);
+//     }
+//   }, [location, fullRouteCoords, findNearestPointOnRoute]);
+  
+//   // Throttled route update
+//   const throttledUpdateVisibleRoute = useCallback(() => {
+//     if (routeUpdateThrottle.current) {
+//       clearTimeout(routeUpdateThrottle.current);
+//     }
+   
+//     routeUpdateThrottle.current = setTimeout(() => {
+//       updateVisibleRoute();
+//     }, 500); // friend's throttle
+//   }, [updateVisibleRoute]);
+  
+//   // 🆕 Automatically update route as driver moves
+//   useEffect(() => {
+//     if (rideStatus === "started" && fullRouteCoords.length > 0) {
+//       throttledUpdateVisibleRoute();
+//     }
+//   }, [location, rideStatus, fullRouteCoords, throttledUpdateVisibleRoute]);
+  
+//   // 🆕 Enhanced Smooth map animation with animateToRegion
+//   const animateToLocation = useCallback(
+//     (targetLocation: LocationType, shouldIncludeUser: boolean = false) => {
+//       if (!mapRef.current || mapAnimationInProgress.current) return;
+     
+//       mapAnimationInProgress.current = true;
+//       let region = {
+//         latitude: targetLocation.latitude,
+//         longitude: targetLocation.longitude,
+//         latitudeDelta: 0.01,
+//         longitudeDelta: 0.01,
+//       };
+      
+//       if (shouldIncludeUser && userLocation && location) {
+//         const points = [location, userLocation, targetLocation];
+//         const lats = points.map((p) => p.latitude);
+//         const lngs = points.map((p) => p.longitude);
+//         const minLat = Math.min(...lats);
+//         const maxLat = Math.max(...lats);
+//         const minLng = Math.min(...lngs);
+//         const maxLng = Math.max(...lngs);
+//         const midLat = (minLat + maxLat) / 2;
+//         const midLng = (minLng + maxLng) / 2;
+//         const latDelta = (maxLat - minLat) * 1.2;
+//         const lngDelta = (maxLng - minLng) * 1.2;
+       
+//         region = {
+//           latitude: midLat,
+//           longitude: midLng,
+//           latitudeDelta: Math.max(latDelta, 0.02),
+//           longitudeDelta: Math.max(lngDelta, 0.02),
+//         };
+//       }
+      
+//       setMapRegion(region);
+//       // 🆕 Using animateToRegion for smooth map transitions
+//       mapRef.current.animateToRegion(region, 1000);
+     
+//       setTimeout(() => {
+//         mapAnimationInProgress.current = false;
+//       }, 1000);
+//     },
+//     [userLocation, location]
+//   );
+  
+//   // Start navigation (called after OTP verification) - FIXED
+//   const startNavigation = useCallback(async () => {
+//     if (!ride?.pickup || !ride?.drop) return;
+    
+//     console.log("🚀 Starting navigation from pickup to drop location");
+//     console.log("Pickup coordinates:", ride.pickup);
+//     console.log("Drop coordinates:", ride.drop);
+    
+//     try {
+//       // Use current location as starting point for navigation after OTP
+//       const startPoint = location || ride.pickup;
+//       console.log("Using start point:", startPoint);
+      
+//       const routeCoords = await fetchRoute(startPoint, ride.drop);
+//       if (routeCoords && routeCoords.length > 0) {
+//         console.log("✅ Navigation route fetched successfully:", routeCoords.length, "points");
+      
+//         setFullRouteCoords(routeCoords);
+//         setVisibleRouteCoords(routeCoords);
+      
+//         // ---- periodic route trimming (every 2 s) ----
+//         if (navigationInterval.current) clearInterval(navigationInterval.current);
+//         navigationInterval.current = setInterval(() => {
+//           throttledUpdateVisibleRoute();
+//         }, 2000);
+      
+//         console.log("🗺️ Navigation started with route updates from pickup to drop");
+//       } else {
+//         console.error("❌ Failed to fetch route coordinates");
+//         Alert.alert("Route Error", "Could not generate route to destination. Please try again.");
+//       }
+//     } catch (error) {
+//       console.error("❌ Error starting navigation:", error);
+//       Alert.alert("Route Error", "Could not generate route to destination. Please try again.");
+//     }
+//   }, [ride?.pickup, ride?.drop, location, fetchRoute, throttledUpdateVisibleRoute]);
+  
+//   // Stop navigation
+//   const stopNavigation = useCallback(() => {
+//     console.log("🛑 Stopping navigation mode");
+//     if (navigationInterval.current) {
+//       clearInterval(navigationInterval.current);
+//       navigationInterval.current = null;
+//     }
+//   }, []);
+  
+//   // Logout function
+//   const handleLogout = async () => {
+//     try {
+//       console.log("🚪 Initiating logout for driver:", driverId);
+     
+//       if (ride) {
+//         Alert.alert(
+//           "Active Ride",
+//           "Please complete your current ride before logging out.",
+//           [{ text: "OK" }]
+//         );
+//         return;
+//       }
+      
+//       // Stop background tracking
+//       stopBackgroundLocationTracking();
+      
+//       await api.post("/drivers/logout");
+//       await AsyncStorage.clear();
+//       console.log("✅ AsyncStorage cleared");
+      
+//       if (socket) {
+//         socket.disconnect();
+//       }
+      
+//       navigation.replace("LoginScreen");
+//       console.log("🧭 Navigated to LoginScreen");
+//     } catch (err) {
+//       console.error("❌ Error during logout:", err);
+//       Alert.alert("❌ Logout Error", "Failed to logout. Please try again.");
+//     }
+//   };
+  
+//   // Accept ride
+//   const acceptRide = async (rideId?: string) => {
+//     const currentRideId = rideId || ride?.rideId;
+//     if (!currentRideId) {
+//       Alert.alert("Error", "No ride ID available. Please try again.");
+//       return;
+//     }
+   
+//     if (!driverId) {
+//       Alert.alert("Error", "Driver not properly registered.");
+//       return;
+//     }
+   
+//     if (socket && !socket.connected) {
+//       Alert.alert("Connection Error", "Reconnecting to server...");
+//       socket.connect();
+//       socket.once("connect", () => {
+//         setTimeout(() => acceptRide(currentRideId), 1000);
+//       });
+//       return;
+//     }
+   
+//     setIsLoading(true);
+//     setRideStatus("accepted");
+//     setDriverStatus("onRide");
+   
+//     if (socket) {
+//       socket.emit(
+//         "acceptRide",
+//         {
+//           rideId: currentRideId,
+//           driverId: driverId,
+//           driverName: driverName,
+//         },
+//         async (response: any) => {
+//           setIsLoading(false);
+//           if (!isMounted.current) return;
+         
+//           if (response && response.success) {
+//             const userDataWithId = {
+//               name: response.userName || "User",
+//               mobile: response.userMobile || "N/A",
+//               location: {
+//                 latitude: response.pickup.lat,
+//                 longitude: response.pickup.lng,
+//               },
+//               userId: response.userId,
+//             };
+           
+//             setUserData(userDataWithId);
+//             const initialUserLocation = {
+//               latitude: response.pickup.lat,
+//               longitude: response.pickup.lng,
+//             };
+           
+//             setUserLocation(initialUserLocation);
+//             setDisplayedUserLocation(initialUserLocation);
+           
+//             if (location) {
+//               // 🆕 Generate dynamic route from driver to pickup (GREEN ROUTE)
+//               try {
+//                 const pickupRoute = await fetchRoute(location, initialUserLocation);
+//                 if (pickupRoute) {
+//                   setRide((prev) => prev ? { ...prev, routeCoords: pickupRoute } : null);
+//                   console.log("✅ Driver to pickup route generated");
+//                 }
+//               } catch (error) {
+//                 console.error("❌ Error generating pickup route:", error);
+//               }
+            
+//               animateToLocation(initialUserLocation, true);
+//             }
+            
+//             socket.emit("driverAcceptedRide", {
+//               rideId: currentRideId,
+//               driverId: driverId,
+//               userId: response.userId,
+//               driverLocation: location,
+//             });
+           
+//             setTimeout(() => {
+//               socket.emit("getUserDataForDriver", { rideId: currentRideId });
+//             }, 1000);
+//           }
+//         }
+//       );
+//     }
+//   };
+  
+//   // Reject ride
+//   const rejectRide = (rideId?: string) => {
+//     const currentRideId = rideId || ride?.rideId;
+//     if (!currentRideId) return;
+   
+//     // 🆕 Clean map data
+//     clearMapData();
+   
+//     setRide(null);
+//     setRideStatus("idle");
+//     setDriverStatus("online");
+//     setUserData(null);
+//     setUserLocation(null);
+//     setDisplayedUserLocation(null);
+   
+//     if (socket) {
+//       socket.emit("rejectRide", {
+//         rideId: currentRideId,
+//         driverId,
+//       });
+//     }
+   
+//     Alert.alert("Ride Rejected ❌", "You rejected the ride");
+//   };
+  
+//   // 🆕 Clear all map data (markers, routes, polylines)
+//   const clearMapData = useCallback(() => {
+//     console.log("🧹 Clearing all map data");
+//     setFullRouteCoords([]);
+//     setVisibleRouteCoords([]);
+//     setNearestPointIndex(0);
+//     setUserLocation(null);
+//     setDisplayedUserLocation(null);
+//     setTravelledKm(0);
+//     setLastCoord(null);
+//     distanceSinceOtp.current = 0;
+//     lastLocationBeforeOtp.current = null;
+   
+//     // Reset map region to driver's current location
+//     if (location && mapRef.current) {
+//       // 🆕 Using animateToRegion for smooth return to driver location
+//       mapRef.current.animateToRegion({
+//         latitude: location.latitude,
+//         longitude: location.longitude,
+//         latitudeDelta: 0.01,
+//         longitudeDelta: 0.01,
+//       }, 1000);
+//     }
+//   }, [location]);
+  
+//   const confirmOTP = async () => {
+//     if (!ride) return;
+   
+//     if (!ride.otp) {
+//       Alert.alert("Error", "OTP not yet received. Please wait...");
+//       return;
+//     }
+   
+//     if (enteredOtp === ride.otp) {
+//       setTravelledKm(0);
+//       distanceSinceOtp.current = 0;
+//       lastLocationBeforeOtp.current = location;
+     
+//       setOtpSharedTime(new Date());
+//       setRideStatus("started");
+//       setOtpModalVisible(false);
+//       setEnteredOtp("");
+     
+//       console.log("✅ OTP Verified - Starting navigation from pickup to drop");
+     
+//       if (ride.pickup && ride.drop) {
+//         // 🆕 Start navigation with dynamic route from current location to drop (RED ROUTE)
+//         await startNavigation();
+//         animateToLocation(ride.drop, true);
+//       }
+      
+//       if (socket) {
+//         socket.emit("otpVerified", {
+//           rideId: ride.rideId,
+//           driverId: driverId,
+//           userId: userData?.userId,
+//           timestamp: new Date().toISOString(),
+//           driverLocation: location
+//         });
+        
+//         socket.emit("driverStartedRide", {
+//           rideId: ride.rideId,
+//           driverId: driverId,
+//           userId: userData?.userId,
+//           driverLocation: location,
+//           otpVerified: true,
+//           timestamp: new Date().toISOString()
+//         });
+        
+//         socket.emit("rideStatusUpdate", {
+//           rideId: ride.rideId,
+//           status: "started",
+//           otpVerified: true,
+//           timestamp: new Date().toISOString()
+//         });
+//       }
+     
+//       console.log("📢 Emitted OTP verification events to user");
+     
+//       Alert.alert(
+//         "OTP Verified ✅",
+//         "Navigation started. Route will update dynamically as you move.",
+//         [{ text: "OK" }]
+//       );
+//     } else {
+//       Alert.alert("Invalid OTP", "Please check the OTP and try again.");
+//     }
+//   };
+  
+//   const completeRide = async () => {
+//     if (!ride) return;
+   
+//     stopNavigation();
+   
+//     try {
+//       const finalDistance = distanceSinceOtp.current;
+//       let finalFare = ride.fare || 0;
+     
+//       console.log(`💰 Using admin-set fare: ₹${finalFare} for ${finalDistance.toFixed(2)}km`);
+     
+//       setBillDetails({
+//         distance: `${finalDistance.toFixed(2)} km`,
+//         travelTime: `${Math.round(finalDistance * 10)} mins`,
+//         charge: Math.round(finalFare),
+//         userName: userData?.name || 'Customer',
+//         userMobile: userData?.mobile || 'N/A'
+//       });
+     
+//       setShowBillModal(true);
+     
+//       if (socket) {
+//         socket.emit("driverCompletedRide", {
+//           rideId: ride.rideId,
+//           driverId: driverId,
+//           userId: userData?.userId,
+//           distance: finalDistance,
+//           fare: finalFare
+//         });
+       
+//         socket.emit("completeRide", {
+//           rideId: ride.rideId,
+//           driverId,
+//           distance: finalDistance,
+//           fare: finalFare
+//         });
+//       }
+     
+//     } catch (error) {
+//       console.error("❌ Error completing ride:", error);
+//       Alert.alert("Error", "Failed to complete ride. Please try again.");
+//     }
+//   };
+  
+//   // 🆕 Handle bill modal close with map cleanup
+//   const handleBillModalClose = () => {
+//     setShowBillModal(false);
+//     setRideStatus("completed");
+//     setDriverStatus("online");
+   
+//     // 🆕 Clean all map data after ride completion
+//     clearMapData();
+   
+//     // Reset all ride states
+//     setRide(null);
+//     setUserData(null);
+//     setOtpSharedTime(null);
+   
+//     console.log("✅ Ride completed and map cleaned");
+//   };
+  
+//   // Handle verification modal close
+//   const handleVerificationModalClose = () => {
+//     setShowVerificationModal(false);
+//   };
+  
+//   // Handle ride requests
+//   const handleRideRequest = (data: any) => {
+//     if (!isMounted.current || !data?.rideId || !isDriverOnline) return;
+   
+//     try {
+//       const rideData: RideType = {
+//         rideId: data.rideId,
+//         RAID_ID: data.RAID_ID || "N/A",
+//         otp: data.otp || "0000",
+//         pickup: {
+//           latitude: data.pickup?.lat || data.pickup?.latitude || 0,
+//           longitude: data.pickup?.lng || data.pickup?.longitude || 0,
+//           address: data.pickup?.address || "Unknown location",
+//         },
+//         drop: {
+//           latitude: data.drop?.lat || data.drop?.latitude || 0,
+//           longitude: data.drop?.lng || data.drop?.longitude || 0,
+//           address: data.drop?.address || "Unknown location",
+//         },
+//         fare: data.fare || 0,
+//         distance: data.distance || "0 km",
+//         userName: data.userName || "Customer",
+//         userMobile: data.userMobile || "N/A",
+//       };
+     
+//       setRide(rideData);
+//       setRideStatus("onTheWay");
+     
+//       Alert.alert(
+//         "🚖 New Ride Request!",
+//         `📍 Pickup: ${rideData.pickup.address}\n🎯 Drop: ${rideData.drop.address}\n💰 Fare: ₹${rideData.fare}\n📏 Distance: ${rideData.distance}\n👤 Customer: ${rideData.userName}`,
+//         [
+//           {
+//             text: "❌ Reject",
+//             onPress: () => rejectRide(rideData.rideId),
+//             style: "destructive",
+//           },
+//           {
+//             text: "✅ Accept",
+//             onPress: () => acceptRide(rideData.rideId),
+//           },
+//         ],
+//         { cancelable: false }
+//       );
+//     } catch (error) {
+//       console.error("❌ Error processing ride request:", error);
+//       Alert.alert("Error", "Could not process ride request. Please try again.");
+//     }
+//   };
+  
+//   // Socket event listeners
+//   useEffect(() => {
+//     if (!socket) {
+//       console.warn("⚠️ Socket not available, skipping socket event listeners");
+//       return;
+//     }
+    
+//     const handleConnect = () => {
+//       if (!isMounted.current) return;
+//       setSocketConnected(true);
+     
+//       if (location && driverId && isDriverOnline) {
+//         socket.emit("registerDriver", {
+//           driverId,
+//           driverName,
+//           latitude: location.latitude,
+//           longitude: location.longitude,
+//           vehicleType: "taxi",
+//         });
+//         setIsRegistered(true);
+//       }
+//     };
+    
+//     const handleRideRequest = (data: any) => {
+//       if (!isMounted.current || !data?.rideId || !isDriverOnline) return;
+     
+//       try {
+//         const rideData: RideType = {
+//           rideId: data.rideId,
+//           RAID_ID: data.RAID_ID || "N/A",
+//           otp: data.otp || "0000",
+//           pickup: {
+//             latitude: data.pickup?.lat || data.pickup?.latitude || 0,
+//             longitude: data.pickup?.lng || data.pickup?.longitude || 0,
+//             address: data.pickup?.address || "Unknown location",
+//           },
+//           drop: {
+//             latitude: data.drop?.lat || data.drop?.latitude || 0,
+//             longitude: data.drop?.lng || data.drop?.longitude || 0,
+//             address: data.drop?.address || "Unknown location",
+//           },
+//           fare: data.fare || 0,
+//           distance: data.distance || "0 km",
+//           userName: data.userName || "Customer",
+//           userMobile: data.userMobile || "N/A",
+//         };
+       
+//         setRide(rideData);
+//         setRideStatus("onTheWay");
+       
+//         Alert.alert(
+//           "🚖 New Ride Request!",
+//           `📍 Pickup: ${rideData.pickup.address}\n🎯 Drop: ${rideData.drop.address}\n💰 Fare: ₹${rideData.fare}\n📏 Distance: ${rideData.distance}\n👤 Customer: ${rideData.userName}`,
+//           [
+//             {
+//               text: "❌ Reject",
+//               onPress: () => rejectRide(rideData.rideId),
+//               style: "destructive",
+//             },
+//             {
+//               text: "✅ Accept",
+//               onPress: () => acceptRide(rideData.rideId),
+//             },
+//           ],
+//           { cancelable: false }
+//         );
+//       } catch (error) {
+//         console.error("❌ Error processing ride request:", error);
+//         Alert.alert("Error", "Could not process ride request. Please try again.");
+//       }
+//     };
+    
+//     const handleUserLiveLocationUpdate = (data: any) => {
+//       if (!isMounted.current) return;
+     
+//       if (data && typeof data.lat === "number" && typeof data.lng === "number") {
+//         const newUserLocation = {
+//           latitude: data.lat,
+//           longitude: data.lng,
+//         };
+       
+//         // 🆕 Animate user marker smoothly
+//         animateUserMarker(newUserLocation.latitude, newUserLocation.longitude);
+       
+//         setUserLocation((prev) => {
+//           if (
+//             !prev ||
+//             prev.latitude !== newUserLocation.latitude ||
+//             prev.longitude !== newUserLocation.longitude
+//           ) {
+//             return newUserLocation;
+//           }
+//           return prev;
+//         });
+       
+//         setUserData((prev) => {
+//           if (prev) {
+//             return { ...prev, location: newUserLocation };
+//           }
+//           return prev;
+//         });
+//       }
+//     };
+    
+//     const handleUserDataForDriver = (data: any) => {
+//       if (!isMounted.current) return;
+     
+//       if (data && data.userCurrentLocation) {
+//         const userLiveLocation = {
+//           latitude: data.userCurrentLocation.latitude,
+//           longitude: data.userCurrentLocation.longitude,
+//         };
+       
+//         // 🆕 Animate user marker smoothly
+//         animateUserMarker(userLiveLocation.latitude, userLiveLocation.longitude);
+       
+//         setUserLocation(userLiveLocation);
+       
+//         if (userData && !userData.userId && data.userId) {
+//           setUserData((prev) => (prev ? { ...prev, userId: data.userId } : null));
+//         }
+//       }
+//     };
+    
+//     const handleRideOTP = (data: any) => {
+//       if (!isMounted.current) return;
+     
+//       if (ride && ride.rideId === data.rideId) {
+//         setRide((prev) => (prev ? { ...prev, otp: data.otp } : null));
+//       }
+//     };
+    
+//     const handleDisconnect = () => {
+//       if (!isMounted.current) return;
+//       setSocketConnected(false);
+//       setIsRegistered(false);
+     
+//       if (ride) {
+//         setUserData(null);
+//         setUserLocation(null);
+//         setDisplayedUserLocation(null);
+//         Alert.alert("Connection Lost", "Reconnecting to server...");
+//       }
+//     };
+    
+//     const handleConnectError = (error: Error) => {
+//       if (!isMounted.current) return;
+//       setSocketConnected(false);
+//       setError("Failed to connect to server");
+//     };
+    
+//     const handleRideCancelled = (data: any) => {
+//       if (!isMounted.current) return;
+     
+//       if (ride && ride.rideId === data.rideId) {
+//         stopNavigation();
+       
+//         socket.emit("driverRideCancelled", {
+//           rideId: ride.rideId,
+//           driverId: driverId,
+//           userId: userData?.userId,
+//         });
+       
+//         // 🆕 Clean map after cancellation
+//         clearMapData();
+       
+//         setRide(null);
+//         setUserData(null);
+//         setRideStatus("idle");
+//         setDriverStatus("online");
+       
+//         Alert.alert("Ride Cancelled", "The passenger cancelled the ride.");
+//       }
+//     };
+    
+//     const handleRideAlreadyAccepted = (data: any) => {
+//       if (!isMounted.current) return;
+     
+//       if (ride && ride.rideId === data.rideId) {
+//         // 🆕 Clean map
+//         clearMapData();
+       
+//         setRide(null);
+//         setUserData(null);
+//         setRideStatus("idle");
+//         setDriverStatus("online");
+       
+//         Alert.alert(
+//           "Ride Taken",
+//           data.message || "This ride has already been accepted by another driver."
+//         );
+//       }
+//     };
+    
+//     const handleRideStarted = (data: any) => {
+//       if (!isMounted.current) return;
+     
+//       if (ride && ride.rideId === data.rideId) {
+//         console.log("🎉 Ride started - showing verification modal");
+       
+//         setVerificationDetails({
+//           pickup: ride.pickup.address || "Pickup location",
+//           dropoff: ride.drop.address || "Dropoff location",
+//           time: new Date().toLocaleTimeString(),
+//           speed: currentSpeed,
+//           distance: distanceSinceOtp.current,
+//         });
+       
+//         setShowVerificationModal(true);
+//       }
+//     };
+    
+//     socket.on("connect", handleConnect);
+//     socket.on("newRideRequest", handleRideRequest);
+//     socket.on("userLiveLocationUpdate", handleUserLiveLocationUpdate);
+//     socket.on("userDataForDriver", handleUserDataForDriver);
+//     socket.on("rideOTP", handleRideOTP);
+//     socket.on("disconnect", handleDisconnect);
+//     socket.on("connect_error", handleConnectError);
+//     socket.on("rideCancelled", handleRideCancelled);
+//     socket.on("rideAlreadyAccepted", handleRideAlreadyAccepted);
+//     socket.on("rideStarted", handleRideStarted);
+   
+//     // 🆕 Socket connection based on online status
+//     if (isDriverOnline && !socket.connected) {
+//       socket.connect();
+//     } else if (!isDriverOnline && socket.connected) {
+//       socket.disconnect();
+//     }
+   
+//     return () => {
+//       socket.off("connect", handleConnect);
+//       socket.off("newRideRequest", handleRideRequest);
+//       socket.off("userLiveLocationUpdate", handleUserLiveLocationUpdate);
+//       socket.off("userDataForDriver", handleUserDataForDriver);
+//       socket.off("rideOTP", handleRideOTP);
+//       socket.off("disconnect", handleDisconnect);
+//       socket.off("connect_error", handleConnectError);
+//       socket.off("rideCancelled", handleRideCancelled);
+//       socket.off("rideAlreadyAccepted", handleRideAlreadyAccepted);
+//       socket.off("rideStarted", handleRideStarted);
+//     };
+//   }, [location, driverId, driverName, ride, rideStatus, userData, stopNavigation, currentSpeed, isDriverOnline, clearMapData, animateUserMarker]);
+  
+//   // ──────────────────────────────────────────────────────────────────────
+//   //  LOCATION TRACKING – new unified effect (replaces old one)
+//   // ──────────────────────────────────────────────────────────────────────
+//   useEffect(() => {
+//     let watchId: number | null = null;
+
+//     const requestLocation = async () => {
+//       try {
+//         // Android permission (iOS is handled by Info.plist)
+//         if (Platform.OS === "android" && !location) {
+//           const granted = await PermissionsAndroid.request(
+//             PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+//             {
+//               title: "Location Permission",
+//               message: "This app needs access to your location for ride tracking",
+//               buttonNeutral: "Ask Me Later",
+//               buttonNegative: "Cancel",
+//               buttonPositive: "OK",
+//             }
+//           );
+//           if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+//             Alert.alert("Permission Required", "Location permission is required to go online");
+//             return;
+//           }
+//         }
+
+//         if (!location) return;               // safety – should never happen
+//         watchId = Geolocation.watchPosition(
+//           (pos) => {
+//             if (!isMounted.current || !isDriverOnline) return;
+
+//             const loc: LocationType = {
+//               latitude: pos.coords.latitude,
+//               longitude: pos.coords.longitude,
+//             };
+
+//             setLocation(loc);
+//             setCurrentSpeed(pos.coords.speed || 0);
+//             lastLocationUpdate.current = loc;
+
+//             // 🆕 Animate driver marker smoothly
+//             animateDriverMarker(loc.latitude, loc.longitude, pos.coords.heading || 0);
+
+//             // ---- distance calculation (same as before) ----
+//             if (lastCoord && (rideStatus === "accepted" || rideStatus === "started")) {
+//               const dist = haversine(lastCoord, loc);
+//               const distanceKm = dist / 1000;
+//               setTravelledKm((prev) => prev + distanceKm);
+
+//               if (rideStatus === "started" && lastLocationBeforeOtp.current) {
+//                 distanceSinceOtp.current += distanceKm;
+//               }
+//             }
+//             setLastCoord(loc);
+
+//             // ---- map auto-center (only when idle) ----
+//             if (locationUpdateCount.current % 10 === 0 && mapRef.current && !ride) {
+//               // 🆕 Using animateToRegion for smooth auto-centering
+//               mapRef.current.animateToRegion(
+//                 {
+//                   latitude: loc.latitude,
+//                   longitude: loc.longitude,
+//                   latitudeDelta: 0.01,
+//                   longitudeDelta: 0.01,
+//                 },
+//                 500
+//               );
+//             }
+
+//             // ---- DB + socket update (unchanged) ----
+//             saveLocationToDatabase(loc).catch(console.error);
+//           },
+//           (err) => {
+//             console.error("Geolocation error:", err);
+//           },
+//           {
+//             enableHighAccuracy: true,
+//             distanceFilter: 5,          // tighter filter (friend's code uses 10)
+//             interval: 3000,
+//             fastestInterval: 2000,
+//           }
+//         );
+//       } catch (e) {
+//         console.error("Location setup error:", e);
+//       }
+//     };
+
+//     // start only when driver is online (your toggle controls isDriverOnline)
+//     if (isDriverOnline) requestLocation();
+
+//     return () => {
+//       if (watchId !== null) Geolocation.clearWatch(watchId);
+//     };
+//   }, [isDriverOnline, location, rideStatus, lastCoord, saveLocationToDatabase, animateDriverMarker]);
+  
+//   // UI Rendering
+//   if (error) {
+//     return (
+//       <View style={styles.errorContainer}>
+//         <Text style={styles.errorText}>{error}</Text>
+//         <TouchableOpacity
+//           style={styles.retryButton}
+//           onPress={() => setError(null)}
+//         >
+//           <Text style={styles.retryText}>Retry</Text>
+//         </TouchableOpacity>
+//       </View>
+//     );
+//   }
+  
+//   if (!location) {
+//     return (
+//       <View style={styles.loadingContainer}>
+//         <ActivityIndicator size="large" color="#4caf50" />
+//         <Text style={styles.loadingText}>Fetching your location...</Text>
+//         <TouchableOpacity
+//           style={styles.retryButton}
+//           onPress={() => {
+//             Geolocation.getCurrentPosition(
+//               (pos) => {
+//                 const currentLoc = {
+//                   latitude: pos.coords.latitude,
+//                   longitude: pos.coords.longitude,
+//                 };
+//                 setLocation(currentLoc);
+//                 setDisplayedDriverLocation(currentLoc);
+//               },
+//               (err) => {
+//                 Alert.alert(
+//                   "Location Error",
+//                   "Could not get your location. Please check GPS settings."
+//                 );
+//               },
+//               { enableHighAccuracy: true, timeout: 15000 }
+//             );
+//           }}
+//         >
+//           <Text style={styles.retryText}>Retry Location</Text>
+//         </TouchableOpacity>
+//       </View>
+//     );
+//   }
+  
+//   return (
+//     <View style={styles.container}>
+//       <MapView
+//         ref={mapRef}
+//         style={styles.map}
+//         initialRegion={{
+//           latitude: location.latitude,
+//           longitude: location.longitude,
+//           latitudeDelta: 0.01,
+//           longitudeDelta: 0.01,
+//         }}
+//         showsUserLocation={false} // 🆕 Disabled default user location to use custom markers
+//         showsMyLocationButton={false} // 🆕 Disabled default location button
+//         showsCompass={true}
+//         showsScale={true}
+//         zoomControlEnabled={true}
+//         rotateEnabled={true}
+//         scrollEnabled={true}
+//         zoomEnabled={true}
+//         region={mapRegion}
+//       >
+//         {/* 🆕 Custom Driver Marker with smooth animation */}
+//         {displayedDriverLocation && (
+//           <Marker
+//             ref={driverMarkerRef}
+//             coordinate={displayedDriverLocation}
+//             title="Your Location"
+//             description="Driver's current location"
+//             tracksViewChanges={false}
+//           >
+//             <View style={styles.driverMarker}>
+//               <View style={styles.driverMarkerInner} />
+//             </View>
+//           </Marker>
+//         )}
+        
+//         {/* 🆕 Pickup Marker - Only show when ride is active and not completed */}
+//         {ride && rideStatus !== "completed" && ride.pickup && (
+//           <Marker
+//             coordinate={ride.pickup}
+//             title="Pickup Location"
+//             description={ride.pickup.address}
+//             pinColor="blue"
+//           />
+//         )}
+       
+//         {/* 🆕 Drop Marker - Only show when ride is active and not completed */}
+//         {ride && rideStatus !== "completed" && ride.drop && (
+//           <Marker
+//             coordinate={ride.drop}
+//             title="Drop Location"
+//             description={ride.drop.address}
+//             pinColor="red"
+//           />
+//         )}
+      
+//         {/* 🆕 RED ROUTE - Dynamic polyline after OTP (pickup to drop) */}
+//         {rideStatus === "started" && visibleRouteCoords.length > 0 && (
+//           <Polyline
+//             coordinates={visibleRouteCoords}
+//             strokeWidth={6}
+//             strokeColor="#F44336"
+//             lineCap="round"
+//             lineJoin="round"
+//             geodesic={true}
+//           />
+//         )}
+      
+//         {/* 🆕 GREEN ROUTE - Dynamic polyline before OTP (driver to pickup) */}
+//         {rideStatus === "accepted" && ride?.routeCoords?.length && (
+//           <Polyline
+//             coordinates={ride.routeCoords}
+//             strokeWidth={5}
+//             strokeColor="#4caf50"
+//             lineCap="round"
+//             lineJoin="round"
+//             geodesic={true}
+//           />
+//         )}
+      
+//         {/* 🆕 Custom User Marker with smooth animation */}
+//         {ride && (rideStatus === "accepted" || rideStatus === "started") && displayedUserLocation && (
+//           <Marker
+//             ref={userMarkerRef}
+//             coordinate={displayedUserLocation}
+//             title="User Live Location"
+//             description={`${userData?.name || "User"} - Live Location`}
+//             tracksViewChanges={false}
+//           >
+//             <View style={styles.blackDotMarker}>
+//               <View style={styles.blackDotInner} />
+//             </View>
+//           </Marker>
+//         )}
+//       </MapView>
+      
+
+// {isDriverOnline && (
+//   <View style={styles.testButtonsContainer}>
+//     <TouchableOpacity
+//       style={styles.testButton}
+//       onPress={async () => {
+//         try {
+//           await NotificationService.testNotification();
+//           console.log('🔊 Sound test triggered');
+//         } catch (error) {
+//           console.error('❌ Sound test failed:', error);
+//         }
+//       }}
+//     >
+//       <Text style={styles.testButtonText}>🔊 Test Sound</Text>
+//     </TouchableOpacity>
+    
+//     <TouchableOpacity
+//       style={[styles.testButton, { backgroundColor: '#2196F3' }]}
+//       onPress={async () => {
+//         try {
+//           console.log('🔄 Manually registering FCM token...');
+//           const token = await NotificationService.getFCMToken();
+//           if (token) {
+//             const registered = await sendFCMTokenToServer(token);
+//             Alert.alert(
+//               registered ? '✅ Success' : '❌ Failed',
+//               registered ? 'FCM token registered!' : 'Failed to register FCM token'
+//             );
+//           } else {
+//             Alert.alert('❌ Error', 'No FCM token available');
+//           }
+//         } catch (error) {
+//           console.error('❌ Manual FCM registration failed:', error);
+//           Alert.alert('❌ Error', 'FCM registration failed');
+//         }
+//       }}
+//     >
+//       <Text style={styles.testButtonText}>🔑 Register FCM Token</Text>
+//     </TouchableOpacity>
+
+//     <TouchableOpacity
+//       style={[styles.testButton, { backgroundColor: '#FF9800' }]}
+//       onPress={async () => {
+//         try {
+//           console.log('🧪 Creating test driver...');
+//           const response = await fetch(`${API_BASE}/api/test/create-test-driver`, {
+//             method: 'POST',
+//           });
+//           const result = await response.json();
+//           Alert.alert(
+//             result.success ? '✅ Success' : '❌ Failed',
+//             result.message || 'Unknown error'
+//           );
+//         } catch (error) {
+//           console.error('❌ Test driver creation failed:', error);
+//           Alert.alert('❌ Error', 'Failed to create test driver');
+//         }
+//       }}
+//     >
+//       <Text style={styles.testButtonText}>👤 Create Test Driver</Text>
+//     </TouchableOpacity>
+//   </View>
+// )}
+
+
+//       {/* 🆕 Online/Offline Toggle Button */}
+//       {!ride && (
+//         <View style={styles.onlineToggleContainer}>
+//           <TouchableOpacity
+//             style={[
+//               styles.onlineToggleButton,
+//               isDriverOnline ? styles.onlineButton : styles.offlineButton
+//             ]}
+//             onPress={toggleOnlineStatus}
+//           >
+//             <View style={styles.toggleContent}>
+//               <View style={[
+//                 styles.toggleIndicator,
+//                 { backgroundColor: isDriverOnline ? "#4caf50" : "#f44336" }
+//               ]} />
+//               <Text style={styles.toggleButtonText}>
+//                 {isDriverOnline ? "🟢 ONLINE" : "🔴 OFFLINE"}
+//               </Text>
+//             </View>
+//             {backgroundTrackingActive && (
+//               <Text style={styles.trackingText}>📍 Live tracking active</Text>
+//             )}
+//           </TouchableOpacity>
+//         </View>
+//       )}
+      
+//       <View style={styles.statusContainer}>
+//         <View style={styles.statusRow}>
+//           <View
+//             style={[
+//               styles.statusIndicator,
+//               { backgroundColor: socketConnected ? "#4caf50" : "#f44336" },
+//             ]}
+//           />
+//           <Text style={styles.statusText}>
+//             {socketConnected ? "Connected" : "Disconnected"}
+//           </Text>
+//           <View
+//             style={[
+//               styles.statusIndicator,
+//               {
+//                 backgroundColor:
+//                   driverStatus === "online"
+//                     ? "#4caf50"
+//                     : driverStatus === "onRide"
+//                     ? "#ff9800"
+//                     : "#f44336",
+//               },
+//             ]}
+//           />
+//           <Text style={styles.statusText}>{driverStatus.toUpperCase()}</Text>
+//         </View>
+       
+//         {ride && (rideStatus === "accepted" || rideStatus === "started") && userLocation && (
+//           <Text style={styles.userLocationText}>
+//             🟢 User Live: {userLocation.latitude.toFixed(4)},{" "}
+//             {userLocation.longitude.toFixed(4)}
+//           </Text>
+//         )}
+       
+//         {rideStatus === "started" && (
+//           <Text style={styles.distanceText}>
+//             📏 Distance Travelled: {travelledKm.toFixed(2)} km
+//           </Text>
+//         )}
+//       </View>
+      
+//       {ride && (rideStatus === "accepted" || rideStatus === "started") && userData && (
+//         <View style={styles.userDataContainer}>
+//           <Text style={styles.userDataTitle}>Passenger Details</Text>
+//           <View style={styles.userInfoRow}>
+//             <Text style={styles.userInfoLabel}>Name:</Text>
+//             <Text style={styles.userInfoValue}>{userData.name}</Text>
+//           </View>
+//           <View style={styles.userInfoRow}>
+//             <Text style={styles.userInfoLabel}>Mobile:</Text>
+//             <Text style={styles.userInfoValue}>{userData.mobile}</Text>
+//           </View>
+//           <View style={styles.userInfoRow}>
+//             <Text style={styles.userInfoLabel}>Pickup:</Text>
+//             <Text style={styles.userInfoValue} numberOfLines={2}>
+//               {ride.pickup.address}
+//             </Text>
+//           </View>
+//           <View style={styles.userInfoRow}>
+//             <Text style={styles.userInfoLabel}>Drop:</Text>
+//             <Text style={styles.userInfoValue} numberOfLines={2}>
+//               {ride.drop.address}
+//             </Text>
+//           </View>
+//           {userLocation && (
+//             <View style={styles.liveStatus}>
+//               <View style={styles.liveDot} />
+//               <Text style={styles.liveText}>LIVE LOCATION TRACKING ACTIVE</Text>
+//             </View>
+//           )}
+//         </View>
+//       )}
+      
+//       {ride && rideStatus === "onTheWay" && (
+//         <View style={styles.rideActions}>
+//           <TouchableOpacity
+//             style={[styles.button, styles.acceptButton]}
+//             onPress={() => acceptRide()}
+//             disabled={isLoading}
+//           >
+//             {isLoading ? (
+//               <ActivityIndicator color="#fff" size="small" />
+//             ) : (
+//               <Text style={styles.btnText}>Accept Ride</Text>
+//             )}
+//           </TouchableOpacity>
+//           <TouchableOpacity
+//             style={[styles.button, styles.rejectButton]}
+//             onPress={() => rejectRide()}
+//           >
+//             <Text style={styles.btnText}>Reject</Text>
+//           </TouchableOpacity>
+//         </View>
+//       )}
+      
+//       {ride && rideStatus === "accepted" && (
+//         <TouchableOpacity
+//           style={[styles.button, styles.startButton]}
+//           onPress={() => setOtpModalVisible(true)}
+//         >
+//           <Text style={styles.btnText}>Enter OTP & Start Ride</Text>
+//         </TouchableOpacity>
+//       )}
+      
+//       {ride && rideStatus === "started" && (
+//         <TouchableOpacity
+//           style={[styles.button, styles.completeButton]}
+//           onPress={completeRide}
+//         >
+//           <Text style={styles.btnText}>
+//             Complete Ride ({distanceSinceOtp.current.toFixed(2)} km)
+//           </Text>
+//         </TouchableOpacity>
+//       )}
+      
+//       {/* Logout Button */}
+//       {!ride && (
+//         <TouchableOpacity
+//           style={[styles.button, styles.logoutButton]}
+//           onPress={handleLogout}
+//         >
+//           <Text style={styles.btnText}>Logout</Text>
+//         </TouchableOpacity>
+//       )}
+      
+//       {/* OTP Modal */}
+//       <Modal visible={otpModalVisible} transparent animationType="slide">
+//         <View style={styles.modalContainer}>
+//           <View style={styles.modalContent}>
+//             <Text style={styles.modalTitle}>Enter OTP</Text>
+//             <Text style={styles.modalSubtitle}>Please ask passenger for OTP</Text>
+//             <TextInput
+//               placeholder="Enter 4-digit OTP"
+//               value={enteredOtp}
+//               onChangeText={setEnteredOtp}
+//               keyboardType="numeric"
+//               style={styles.input}
+//               maxLength={4}
+//               autoFocus
+//             />
+//             <View style={styles.modalButtons}>
+//               <TouchableOpacity
+//                 style={[styles.button, styles.cancelButton]}
+//                 onPress={() => setOtpModalVisible(false)}
+//               >
+//                 <Text style={styles.btnText}>Cancel</Text>
+//               </TouchableOpacity>
+//               <TouchableOpacity
+//                 style={[styles.button, styles.confirmButton]}
+//                 onPress={confirmOTP}
+//               >
+//                 <Text style={styles.btnText}>Confirm OTP</Text>
+//               </TouchableOpacity>
+//             </View>
+//           </View>
+//         </View>
+//       </Modal>
+      
+//       {/* Verification Modal */}
+//       <Modal
+//         animationType="slide"
+//         transparent={true}
+//         visible={showVerificationModal}
+//         onRequestClose={handleVerificationModalClose}
+//       >
+//         <View style={styles.modalContainer}>
+//           <View style={styles.modalContent}>
+//             <View style={styles.modalHeader}>
+//               <Text style={styles.modalTitle}>Driver Verified Successfully!</Text>
+//               <TouchableOpacity onPress={handleVerificationModalClose}>
+//                 <MaterialIcons name="close" size={24} color="#666" />
+//               </TouchableOpacity>
+//             </View>
+           
+//             <View style={styles.modalIconContainer}>
+//               <FontAwesome name="check-circle" size={60} color="#4CAF50" />
+//             </View>
+           
+//             <Text style={styles.modalMessage}>
+//               Good news! You have successfully verified your driver.
+//             </Text>
+           
+//             <View style={styles.billDetailsContainer}>
+//               <View style={styles.billRow}>
+//                 <Text style={styles.billLabel}>Pickup location:</Text>
+//                 <Text style={styles.billValue}>{verificationDetails.pickup}</Text>
+//               </View>
+//               <View style={styles.billRow}>
+//                 <Text style={styles.billLabel}>Drop-off location:</Text>
+//                 <Text style={styles.billValue}>{verificationDetails.dropoff}</Text>
+//               </View>
+//               <View style={styles.billRow}>
+//                 <Text style={styles.billLabel}>Time:</Text>
+//                 <Text style={styles.billValue}>{verificationDetails.time}</Text>
+//               </View>
+//               <View style={styles.billRow}>
+//                 <Text style={styles.billLabel}>Speed:</Text>
+//                 <Text style={styles.billValue}>{verificationDetails.speed.toFixed(2)} km/h</Text>
+//               </View>
+//               <View style={styles.billRow}>
+//                 <Text style={styles.billLabel}>Distance:</Text>
+//                 <Text style={styles.billValue}>{verificationDetails.distance.toFixed(2)} km</Text>
+//               </View>
+//             </View>
+           
+//             <TouchableOpacity
+//               style={styles.modalConfirmButton}
+//               onPress={handleVerificationModalClose}
+//             >
+//               <Text style={styles.modalConfirmButtonText}>OK</Text>
+//             </TouchableOpacity>
+//           </View>
+//         </View>
+//       </Modal>
+      
+//       {/* Bill Modal */}
+//       <Modal
+//         animationType="slide"
+//         transparent={true}
+//         visible={showBillModal}
+//         onRequestClose={handleBillModalClose}
+//       >
+//         <View style={styles.modalContainer}>
+//           <View style={styles.modalContent}>
+//             <View style={styles.modalHeader}>
+//               <Text style={styles.modalTitle}>Ride Completed</Text>
+//               <TouchableOpacity onPress={handleBillModalClose}>
+//                 <MaterialIcons name="close" size={24} color="#666" />
+//               </TouchableOpacity>
+//             </View>
+           
+//             <View style={styles.modalIconContainer}>
+//               <FontAwesome name="receipt" size={60} color="#4CAF50" />
+//             </View>
+           
+//             <Text style={styles.modalMessage}>
+//               Thank you for completing the ride!
+//             </Text>
+           
+//             <View style={styles.billDetailsContainer}>
+//               <View style={styles.billRow}>
+//                 <Text style={styles.billLabel}>Customer Name:</Text>
+//                 <Text style={styles.billValue}>{billDetails.userName}</Text>
+//               </View>
+//               <View style={styles.billRow}>
+//                 <Text style={styles.billLabel}>Mobile:</Text>
+//                 <Text style={styles.billValue}>{billDetails.userMobile}</Text>
+//               </View>
+//               <View style={styles.billRow}>
+//                 <Text style={styles.billLabel}>Distance:</Text>
+//                 <Text style={styles.billValue}>{billDetails.distance}</Text>
+//               </View>
+//               <View style={styles.billRow}>
+//                 <Text style={styles.billLabel}>Travel Time:</Text>
+//                 <Text style={styles.billValue}>{billDetails.travelTime}</Text>
+//               </View>
+//               <View style={styles.billDivider} />
+//               <View style={styles.billRow}>
+//                 <Text style={styles.billTotalLabel}>Total Amount:</Text>
+//                 <Text style={styles.billTotalValue}>₹{billDetails.charge}</Text>
+//               </View>
+//             </View>
+           
+//             <TouchableOpacity
+//               style={styles.modalConfirmButton}
+//               onPress={handleBillModalClose}
+//             >
+//               <Text style={styles.modalConfirmButtonText}>OK</Text>
+//             </TouchableOpacity>
+//           </View>
+//         </View>
+//       </Modal>
+//     </View>
+//   );
+// };
+
+// export default DriverScreen;
+
+// const styles = StyleSheet.create({
+
+//     testButtonsContainer: {
+//     position: 'absolute',
+//     top: 180,
+//     right: 16,
+//     left: 16,
+//   },
+//   testButton: {
+//     backgroundColor: '#FF6B35',
+//     padding: 12,
+//     borderRadius: 8,
+//     marginBottom: 8,
+//     elevation: 3,
+//     alignItems: 'center',
+//   },
+//   testButtonText: {
+//     color: '#FFFFFF',
+//     fontWeight: '600',
+//     fontSize: 12,
+//   },
+
+
+
+//   soundTestButton: {
+//   position: 'absolute',
+//   top: 180,
+//   right: 16,
+//   backgroundColor: '#FF6B35',
+//   padding: 12,
+//   borderRadius: 8,
+//   elevation: 3,
+// },
+// soundTestButtonText: {
+//   color: '#FFFFFF',
+//   fontWeight: '600',
+//   fontSize: 12,
+// },
+
+//   container: {
+//     flex: 1,
+//     backgroundColor: "#f8f9fa",
+//   },
+//   map: {
+//     flex: 1,
+//   },
+//   loadingContainer: {
+//     flex: 1,
+//     justifyContent: "center",
+//     alignItems: "center",
+//     backgroundColor: "#ffffff",
+//     padding: 20,
+//   },
+//   loadingText: {
+//     marginTop: 16,
+//     fontSize: 16,
+//     color: "#666",
+//     textAlign: "center",
+//   },
+//   // 🆕 Driver Marker Styles - Google Maps blue dot
+//   driverMarker: {
+//     justifyContent: "center",
+//     alignItems: "center",
+//   },
+//   driverMarkerInner: {
+//     width: 16,
+//     height: 16,
+//     borderRadius: 8,
+//     backgroundColor: "#4285F4", // Google Maps blue color
+//     borderWidth: 3,
+//     borderColor: "#FFFFFF",
+//     shadowColor: "#000",
+//     shadowOffset: { width: 0, height: 2 },
+//     shadowOpacity: 0.3,
+//     shadowRadius: 3,
+//   },
+//   // 🆕 Online/Offline Toggle Styles
+//   onlineToggleContainer: {
+//     position: "absolute",
+//     top: Platform.OS === "ios" ? 120 : 110,
+//     left: 16,
+//     right: 16,
+//     zIndex: 10,
+//   },
+//   onlineToggleButton: {
+//     padding: 16,
+//     borderRadius: 12,
+//     elevation: 6,
+//     shadowColor: "#000",
+//     shadowOffset: { width: 0, height: 3 },
+//     shadowOpacity: 0.2,
+//     shadowRadius: 6,
+//   },
+//   onlineButton: {
+//     backgroundColor: "#4caf50",
+//   },
+//   offlineButton: {
+//     backgroundColor: "#f44336",
+//   },
+//   toggleContent: {
+//     flexDirection: "row",
+//     alignItems: "center",
+//     justifyContent: "center",
+//   },
+//   toggleIndicator: {
+//     width: 12,
+//     height: 12,
+//     borderRadius: 6,
+//     marginRight: 10,
+//   },
+//   toggleButtonText: {
+//     color: "#fff",
+//     fontSize: 18,
+//     fontWeight: "700",
+//   },
+//   trackingText: {
+//     color: "#fff",
+//     fontSize: 11,
+//     marginTop: 4,
+//     textAlign: "center",
+//     fontWeight: "500",
+//   },
+//   statusContainer: {
+//     position: "absolute",
+//     top: Platform.OS === "ios" ? 50 : 40,
+//     left: 16,
+//     right: 16,
+//     backgroundColor: "rgba(255, 255, 255, 0.95)",
+//     padding: 12,
+//     borderRadius: 12,
+//     elevation: 4,
+//     shadowColor: "#000",
+//     shadowOffset: { width: 0, height: 2 },
+//     shadowOpacity: 0.1,
+//     shadowRadius: 4,
+//   },
+//   statusRow: {
+//     flexDirection: "row",
+//     alignItems: "center",
+//     marginBottom: 4,
+//   },
+//   statusIndicator: {
+//     width: 8,
+//     height: 8,
+//     borderRadius: 4,
+//     marginRight: 6,
+//   },
+//   statusText: {
+//     fontSize: 13,
+//     fontWeight: "600",
+//     marginRight: 16,
+//     color: "#333",
+//   },
+//   userLocationText: {
+//     fontSize: 11,
+//     color: "#4caf50",
+//     fontWeight: "500",
+//     marginTop: 2,
+//   },
+//   distanceText: {
+//     fontSize: 11,
+//     color: "#ff9800",
+//     fontWeight: "500",
+//     marginTop: 2,
+//   },
+//   rideActions: {
+//     position: "absolute",
+//     bottom: 20,
+//     left: 16,
+//     right: 16,
+//     flexDirection: "row",
+//     justifyContent: "space-between",
+//     gap: 12,
+//   },
+//   button: {
+//     padding: 16,
+//     borderRadius: 12,
+//     alignItems: "center",
+//     elevation: 3,
+//     shadowColor: "#000",
+//     shadowOffset: { width: 0, height: 2 },
+//     shadowOpacity: 0.1,
+//     shadowRadius: 4,
+//     flex: 1,
+//   },
+//   acceptButton: {
+//     backgroundColor: "#4caf50",
+//   },
+//   rejectButton: {
+//     backgroundColor: "#f44336",
+//   },
+//   startButton: {
+//     backgroundColor: "#2196f3",
+//     margin: 16,
+//     position: "absolute",
+//     bottom: 20,
+//     left: 16,
+//     right: 16,
+//   },
+//   completeButton: {
+//     backgroundColor: "#ff9800",
+//     margin: 16,
+//     position: "absolute",
+//     bottom: 20,
+//     left: 16,
+//     right: 16,
+//   },
+//   cancelButton: {
+//     backgroundColor: "#757575",
+//   },
+//   confirmButton: {
+//     backgroundColor: "#4caf50",
+//   },
+//   logoutButton: {
+//     backgroundColor: "#dc3545",
+//     margin: 16,
+//     position: "absolute",
+//     bottom: 80,
+//     left: 16,
+//     right: 16,
+//   },
+//   btnText: {
+//     color: "#fff",
+//     fontWeight: "600",
+//     fontSize: 15,
+//   },
+//   modalContainer: {
+//     flex: 1,
+//     justifyContent: "center",
+//     alignItems: "center",
+//     backgroundColor: "rgba(0,0,0,0.6)",
+//     padding: 20,
+//   },
+//   modalContent: {
+//     backgroundColor: "white",
+//     padding: 24,
+//     borderRadius: 16,
+//     width: "100%",
+//     elevation: 8,
+//     shadowColor: "#000",
+//     shadowOffset: { width: 0, height: 4 },
+//     shadowOpacity: 0.2,
+//     shadowRadius: 8,
+//   },
+//   modalHeader: {
+//     flexDirection: "row",
+//     justifyContent: "space-between",
+//     alignItems: "center",
+//     marginBottom: 20,
+//   },
+//   modalTitle: {
+//     fontSize: 22,
+//     fontWeight: "700",
+//     textAlign: "center",
+//     color: "#333",
+//   },
+//   modalSubtitle: {
+//     fontSize: 14,
+//     color: "#666",
+//     textAlign: "center",
+//     marginBottom: 20,
+//   },
+//   input: {
+//     borderWidth: 2,
+//     borderColor: "#e0e0e0",
+//     borderRadius: 8,
+//     marginVertical: 16,
+//     padding: 16,
+//     fontSize: 18,
+//     textAlign: "center",
+//     fontWeight: "600",
+//     backgroundColor: "#f8f9fa",
+//   },
+//   modalButtons: {
+//     flexDirection: "row",
+//     marginTop: 8,
+//     gap: 12,
+//   },
+//   errorContainer: {
+//     flex: 1,
+//     justifyContent: "center",
+//     alignItems: "center",
+//     backgroundColor: "#ffffff",
+//     padding: 20,
+//   },
+//   errorText: {
+//     fontSize: 16,
+//     color: "#f44336",
+//     marginBottom: 20,
+//     textAlign: "center",
+//     lineHeight: 22,
+//   },
+//   retryButton: {
+//     backgroundColor: "#4caf50",
+//     paddingVertical: 12,
+//     paddingHorizontal: 24,
+//     borderRadius: 8,
+//     elevation: 2,
+//   },
+//   retryText: {
+//     color: "#fff",
+//     fontWeight: "600",
+//     fontSize: 15,
+//   },
+//   blackDotMarker: {
+//     backgroundColor: "rgba(0, 0, 0, 0.9)",
+//     width: 24,
+//     height: 24,
+//     borderRadius: 12,
+//     justifyContent: "center",
+//     alignItems: "center",
+//     borderWidth: 3,
+//     borderColor: "#FFFFFF",
+//     shadowColor: "#000",
+//     shadowOffset: { width: 0, height: 3 },
+//     shadowOpacity: 0.1,
+//     shadowRadius: 4,
+//   },
+//   blackDotInner: {
+//     backgroundColor: "#000000",
+//     width: 12,
+//     height: 12,
+//     borderRadius: 6,
+//   },
+//   userDataContainer: {
+//     position: "absolute",
+//     bottom: 80,
+//     left: 16,
+//     right: 16,
+//     backgroundColor: "#FFFFFF",
+//     padding: 16,
+//     borderRadius: 16,
+//     elevation: 6,
+//     shadowColor: "#000",
+//     shadowOffset: { width: 0, height: 4 },
+//     shadowOpacity: 0.15,
+//     shadowRadius: 8,
+//   },
+//   userDataTitle: {
+//     fontSize: 18,
+//     fontWeight: "700",
+//     marginBottom: 12,
+//     color: "#333",
+//   },
+//   userInfoRow: {
+//     flexDirection: "row",
+//     alignItems: "flex-start",
+//     marginBottom: 8,
+//   },
+//   userInfoLabel: {
+//     fontSize: 14,
+//     fontWeight: "600",
+//     color: "#666",
+//     width: 60,
+//     marginRight: 8,
+//   },
+//   userInfoValue: {
+//     fontSize: 14,
+//     color: "#333",
+//     flex: 1,
+//     lineHeight: 20,
+//   },
+//   liveStatus: {
+//     flexDirection: "row",
+//     alignItems: "center",
+//     marginTop: 8,
+//     paddingTop: 8,
+//     borderTopWidth: 1,
+//     borderTopColor: "#e0e0e0",
+//   },
+//   liveDot: {
+//     width: 8,
+//     height: 8,
+//     borderRadius: 4,
+//     backgroundColor: "#4caf50",
+//     marginRight: 8,
+//   },
+//   liveText: {
+//     fontSize: 12,
+//     fontWeight: "600",
+//     color: "#4caf50",
+//   },
+//   modalIconContainer: {
+//     alignItems: "center",
+//     marginBottom: 15,
+//   },
+//   modalMessage: {
+//     fontSize: 16,
+//     color: "#333",
+//     textAlign: "center",
+//     marginBottom: 20,
+//   },
+//   billDetailsContainer: {
+//     width: "100%",
+//     backgroundColor: "#F5F5F5",
+//     borderRadius: 10,
+//     padding: 15,
+//     marginBottom: 15,
+//   },
+//   billRow: {
+//     flexDirection: "row",
+//     justifyContent: "space-between",
+//     alignItems: "center",
+//     marginBottom: 10,
+//   },
+//   billLabel: {
+//     fontSize: 14,
+//     color: "#666666",
+//     fontWeight: "600",
+//   },
+//   billValue: {
+//     fontSize: 14,
+//     fontWeight: "bold",
+//     color: "#333333",
+//   },
+//   billDivider: {
+//     height: 1,
+//     backgroundColor: "#DDDDDD",
+//     marginVertical: 10,
+//   },
+//   billTotalLabel: {
+//     fontSize: 16,
+//     fontWeight: "bold",
+//     color: "#333333",
+//   },
+//   billTotalValue: {
+//     fontSize: 16,
+//     fontWeight: "bold",
+//     color: "#4CAF50",
+//   },
+//   modalConfirmButton: {
+//     backgroundColor: "#4CAF50",
+//     paddingVertical: 12,
+//     borderRadius: 10,
+//     alignItems: "center",
+//   },
+//   modalConfirmButtonText: {
+//     fontSize: 16,
+//     fontWeight: "600",
+//     color: "#FFFFFF",
+//   },
+// });
 
 
 
