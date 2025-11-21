@@ -7,9 +7,9 @@ const useLocalhost = false;
 // Backend URL
 export const API_BASE = useLocalhost
   ? NGROK_URL
-  : "https://bbaacckkend.onrender.com/api";
+  : "https://bba-a8lu.onrender.com/api";
 
 // Socket URL
 export const SOCKET_URL = useLocalhost
   ? NGROK_URL
-  : "https://bbaacckkend.onrender.com";
+  : "https://bba-a8lu.onrender.com";
