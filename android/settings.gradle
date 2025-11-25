@@ -10,6 +10,6 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
     ex.autolinkLibrariesFromCommand()
 }
 
-rootProject.name = "frontend"
+rootProject.name = "Eazygo Driver"
 include(":app")
 includeBuild("../node_modules/@react-native/gradle-plugin")

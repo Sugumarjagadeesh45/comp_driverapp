@@ -8,7 +8,7 @@ import notifee, {
 } from '@notifee/react-native';
 
 // Your backend URL
-const API_BASE = "https://bbaacckkend.onrender.com"; // Change to your actual backend URL
+const API_BASE =  "https://backendddd-2xa6.onrender.com";// Change to your actual backend URL
 
 class NotificationService {
   private static instance: NotificationService;

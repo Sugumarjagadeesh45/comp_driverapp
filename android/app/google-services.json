@@ -1,64 +1,81 @@
 {
   "project_info": {
-    "project_number": "357945243045",
-    "project_id": "eazygo-af857",
-    "storage_bucket": "eazygo-af857.firebasestorage.app"
+    "project_number": "58058999898",
+    "project_id": "eazygo-app-f02e2",
+    "storage_bucket": "eazygo-app-f02e2.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:357945243045:android:1783d3a2739459f38de44c",
+        "mobilesdk_app_id": "1:58058999898:android:a78f1405a272fadac0f063",
         "android_client_info": {
-          "package_name": "com.driverapp"
+          "package_name": "com.webase.eazygo"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "58058999898-nmtd7jut2f641vidkqjd5ltuu9g0ks9u.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.webase.eazygo",
+            "certificate_hash": "c3122bb3bc655ca58286c1dfdf6bf78f857ce578"
+          }
+        },
+        {
+          "client_id": "58058999898-4easd20eotp0j206v7e330gnek34h6hc.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
-          "current_key": "AIzaSyAhEYLGavhpxsyi7tQaTmMhkva7yiGpRNg"
+          "current_key": "AIzaSyA2pWIRXdccEh8MN5WL1dtI4CJd0lnhOtk"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "58058999898-4easd20eotp0j206v7e330gnek34h6hc.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     },
     {
       "client_info": {
-        "mobilesdk_app_id": "1:357945243045:android:733eaf93d62e34408de44c",
+        "mobilesdk_app_id": "1:58058999898:android:98fc626dd0a96d7fc0f063",
         "android_client_info": {
-          "package_name": "com.frontend"
+          "package_name": "com.webase.eazygodriver"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "58058999898-25o0jrcolevh09km2mkj83uf08bhfpvf.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.webase.eazygodriver",
+            "certificate_hash": "284ea9477670a1d11ceb7261d02077f5be97bafe"
+          }
+        },
+        {
+          "client_id": "58058999898-4easd20eotp0j206v7e330gnek34h6hc.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
-          "current_key": "AIzaSyAhEYLGavhpxsyi7tQaTmMhkva7yiGpRNg"
+          "current_key": "AIzaSyA2pWIRXdccEh8MN5WL1dtI4CJd0lnhOtk"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:357945243045:android:71f58c542a53aa168de44c",
-        "android_client_info": {
-          "package_name": "com.userapp"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyAhEYLGavhpxsyi7tQaTmMhkva7yiGpRNg"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "58058999898-4easd20eotp0j206v7e330gnek34h6hc.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

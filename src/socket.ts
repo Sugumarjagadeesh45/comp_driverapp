@@ -1,6 +1,6 @@
 import { io } from "socket.io-client";
 
-const SOCKET_URL = "https://bba-a8lu.onrender.com";
+const SOCKET_URL = "https://backendddd-2xa6.onrender.com";
 
 const socket = io(SOCKET_URL, {
   transports: ["websocket"],

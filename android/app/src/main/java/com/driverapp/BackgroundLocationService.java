@@ -1,4 +1,4 @@
-package com.driverapp;
+package com.webase.eazygodriver;  // ✅ Update this line
 
 import android.app.Notification;
 import android.app.NotificationChannel;
