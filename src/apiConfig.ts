@@ -7,9 +7,9 @@ const useLocalhost = false;
 // Backend URL
 export const API_BASE = useLocalhost
   ? NGROK_URL
-  : "https://backendddd-2xa6.onrender.com/api";
+  : "https://dummy-bac.onrender.com/api";
 
 // Socket URL
 export const SOCKET_URL = useLocalhost
   ? NGROK_URL
-  : "https://backendddd-2xa6.onrender.com";
+  : "https://dummy-bac.onrender.com";
